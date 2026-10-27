@@ -7,8 +7,11 @@ Tap anywhere to toggle the service.
 """
 
 import os
+import sys
 import time
 import urllib.request
+
+sys.path.insert(0, "/kvmcomm/apps")  # SDK 目录（appbase 所在）
 
 from appbase import GREEN, GRAY, RED, app, rgb565
 
