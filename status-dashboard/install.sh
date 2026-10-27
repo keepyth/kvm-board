@@ -1,0 +1,27 @@
+#!/bin/sh
+# Status Dashboard installer: deploy the web service as a systemd unit.
+set -e
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEST=/opt/status-dashboard
+
+mkdir -p "$DEST"
+cp "$APP_DIR/service/main.py" "$DEST/main.py"
+cp "$APP_DIR/service/page.html" "$DEST/page.html"
+
+cat > /etc/systemd/system/nanokvm-status.service <<UNIT
+[Unit]
+Description=NanoKVM Go+ Status Dashboard
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 $DEST/main.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now nanokvm-status
+echo "Status Dashboard installed: http://<kvm-ip>:8123"

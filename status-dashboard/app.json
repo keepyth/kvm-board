@@ -1,0 +1,9 @@
+{
+  "app_id": "com.keepyth.status_dashboard",
+  "name": "Status Dashboard",
+  "creator": "keepyth x WorkBuddy",
+  "create_time": "2026-10-27",
+  "version": "1.0.0",
+  "desc": "Device status web dashboard at http://<kvm-ip>:8123 (installed as background service).",
+  "category": "tool"
+}

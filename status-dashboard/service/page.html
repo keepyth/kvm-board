@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NanoKVM-Go+ 状态面板</title>
+<meta http-equiv="refresh" content="3">
+<style>
+body{font-family:system-ui,'Segoe UI',sans-serif;background:#0b0e14;color:#e6e9ef;margin:0;padding:24px}
+h1{font-size:20px;margin:0 0 4px} .sub{color:#8a93a5;font-size:12px;margin-bottom:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;max-width:960px}
+.card{background:#161a23;border:1px solid #232a38;border-radius:12px;padding:16px}
+.card h2{font-size:12px;color:#8a93a5;margin:0 0 8px;text-transform:uppercase;letter-spacing:.08em}
+.big{font-size:30px;font-weight:600;line-height:1.1}
+.unit{font-size:13px;color:#8a93a5;font-weight:400}
+.bar{height:8px;background:#232a38;border-radius:4px;margin-top:10px;overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:4px}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td{padding:5px 0;border-bottom:1px solid #232a38}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:#4ade80}
+.dot.off{background:#f87171}
+footer{margin-top:20px;color:#5b6473;font-size:11px}
+</style></head><body>
+<h1>NanoKVM-Go+ 状态面板</h1>
+<div class="sub">刷新于 __TIME__ · 每 3 秒自动刷新 · <a href="/api/status" style="color:#50aaff">JSON API</a></div>
+<div class="grid">
+<div class="card"><h2>CPU</h2><div class="big">__CPU__<span class="unit">%</span></div>
+<div class="bar"><i style="width:__CPU__%;background:#50aaff"></i></div>
+<div class="sub">load: __LOAD__</div></div>
+<div class="card"><h2>内存</h2><div class="big">__MEM_USED__ <span class="unit">/ __MEM_TOTAL__ MB</span></div>
+<div class="bar"><i style="width:__MEM_PCT__%;background:#4ade80"></i></div></div>
+<div class="card"><h2>温度</h2><div class="big __TCLS__">__TEMP__<span class="unit">°C</span></div>
+<div class="sub">SoC thermal zone 0</div></div>
+<div class="card"><h2>存储</h2><div class="big">__DISK_USED__ <span class="unit">/ __DISK_TOTAL__ GB</span></div>
+<div class="bar"><i style="width:__DISK_PCT__%;background:#a78bfa"></i></div></div>
+<div class="card"><h2>运行时间</h2><div class="big" style="font-size:22px">__UPTIME__</div>
+<div class="sub">内核 __KERNEL__</div></div>
+<div class="card"><h2>Go+ 功能开关</h2><table>__SVC_ROWS__</table></div>
+<div class="card"><h2>核心服务</h2><table>__CORE_ROWS__</table></div>
+<div class="card"><h2>屏幕记忆占用</h2><div class="big" style="font-size:22px">__TL_MB__ <span class="unit">MB</span></div>
+<div class="sub">screen timelapse / 系统文件</div></div>
+</div>
+<footer>NanoKVM Status Service · 仅限局域网访问 · systemctl status nanokvm-status</footer>
+</body></html>
