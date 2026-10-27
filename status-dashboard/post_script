@@ -1,5 +1,6 @@
 #!/bin/sh
-# Status Dashboard installer: deploy the web service as a systemd unit.
+#!/bin/sh
+# Status Dashboard installer the web service as a systemd unit.
 set -e
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEST=/opt/status-dashboard
