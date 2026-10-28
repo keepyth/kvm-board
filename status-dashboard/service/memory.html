@@ -46,6 +46,12 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
 .dcell .lbl{font-size:11px;color:#8a93a5;text-transform:uppercase;letter-spacing:.06em}
 .dcell .val{font-size:18px;font-weight:600;margin-top:2px}
 .dcell .hint{font-size:11px;color:#8a93a5;margin-top:2px}
+.turn{margin:8px 0}
+.turn .role{display:inline-block;font-size:11px;font-weight:600;padding:1px 8px;border-radius:8px;margin-bottom:4px}
+.turn .role.user{background:#1c2a44;color:#7cb5ff}
+.turn .role.system{background:#232a38;color:#8a93a5}
+.turn .role.assistant{background:#3b2f63;color:#c4b1ff}
+.turn pre.body{max-height:200px}
 </style></head><body>
 <h1>🧠 记忆织网面板</h1>
 <div class="sub">刷新于 __TIME__ · 每 10 秒自动刷新 · memfab 服务 __SVC__ · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
@@ -84,6 +90,11 @@ async function openDrawer(){
     let req="(", resp="无)";
     try{req=JSON.stringify(s.last_request,null,2).slice(0,4000)}catch(e){}
     try{resp=typeof s.last_response==="string"?s.last_response:JSON.stringify(s.last_response,null,2);resp=resp.slice(0,6000)}catch(e){}
+    const ROLE={user:"用户输入",system:"系统提示",assistant:"模型回复"};
+    const turns=(s.last_conv||[]).map(t=>{
+      const cls=t.role==="assistant"?"assistant":(t.role==="system"?"system":"user");
+      return `<div class="turn"><span class="role ${cls}">${ROLE[t.role]||t.role}</span><pre class="body">${String(t.text||"").replace(/</g,"&lt;")}</pre></div>`;
+    }).join("")||'<div class="sub">(无对话内容)</div>';
     b.innerHTML=`
     <div class="dcell" style="margin-bottom:10px"><div class="lbl">模型</div><div class="val" style="font-size:14px;word-break:break-all">${s.model}</div>
       <div class="hint">经 llm-proxy → LM Studio</div></div>
@@ -93,7 +104,7 @@ async function openDrawer(){
       <div class="dcell" style="grid-column:1/-1"><div class="lbl">累计 Token 消耗</div><div class="val">${fmt(s.total_tokens)}</div>
         <div class="hint">输入 ${fmt(s.prompt_tokens)} / 输出 ${fmt(s.completion_tokens)}</div></div>
     </div>
-    <div class="kv"><b>上次对话内容（模型返回）</b><pre class="body">${(s.last_content||"(无文本返回)").replace(/</g,"&lt;")}</pre>
+    <div class="kv"><b>上次对话内容</b>${turns}
     <details><summary>上次对话原始出/入参数（点击展开）</summary>
       <b>请求 (request)：</b><pre class="body" style="max-height:300px">${req.replace(/</g,"&lt;")}</pre>
       <b>响应 (response)：</b><pre class="body" style="max-height:300px">${resp.replace(/</g,"&lt;")}</pre>

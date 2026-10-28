@@ -190,12 +190,41 @@ def snapshot_full():
     return s
 
 
+def extract_conv(e, content):
+    """从 trace 的出入参数里抽取人类可读的对话文本（去掉 JSON 结构）。"""
+    conv = []
+    req = e.get("request")
+    if isinstance(req, str):
+        try:
+            req = json.loads(req)
+        except Exception:
+            req = None
+    if isinstance(req, dict):
+        for m in (req.get("messages") or []):
+            if not isinstance(m, dict):
+                continue
+            text = m.get("content", "")
+            if not isinstance(text, str):
+                try:
+                    text = json.dumps(text, ensure_ascii=False)
+                except Exception:
+                    text = str(text)
+            text = text.strip()
+            if text:
+                conv.append({"role": m.get("role", "?"), "text": text[:1500]})
+    content = (content or "").strip()
+    if content:
+        conv.append({"role": "assistant", "text": content[:1500]})
+    return conv
+
+
 def memfab_llm_status():
     """解析 llm-trace.jsonl：模型调用统计 + 最近一次对话详情。"""
     info = {"model": "", "last_time": "--", "last_stage": "", "today_calls": 0,
             "total_calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
             "total_tokens": 0, "last_content": "", "last_request": "",
-            "last_response": "", "last_ok": True, "last_duration_ms": None}
+            "last_response": "", "last_ok": True, "last_duration_ms": None,
+            "last_conv": []}
     path = os.path.join(MEMFAB, "logs", "llm-trace.jsonl")
     if not os.path.isfile(path):
         return info
@@ -234,6 +263,7 @@ def memfab_llm_status():
                 info["last_response"] = parsed if parsed is not None else raw
                 info["last_ok"] = not e.get("error")
                 info["last_duration_ms"] = e.get("duration_ms")
+                info["last_conv"] = extract_conv(e, content)
     except OSError:
         pass
     return info
