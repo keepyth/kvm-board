@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>记忆织网面板 · NanoKVM-Go+</title>
+<meta http-equiv="refresh" content="10">
+<style>
+body{font-family:system-ui,'Segoe UI',sans-serif;background:#0b0e14;color:#e6e9ef;margin:0;padding:24px}
+h1{font-size:20px;margin:0 0 4px} .sub{color:#8a93a5;font-size:12px;margin-bottom:20px}
+a{color:#50aaff;text-decoration:none} a:hover{text-decoration:underline}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;max-width:1080px}
+.card{background:#161a23;border:1px solid #232a38;border-radius:12px;padding:16px;margin-bottom:14px}
+.card h2{font-size:12px;color:#8a93a5;margin:0 0 8px;text-transform:uppercase;letter-spacing:.08em;word-break:break-all}
+.big{font-size:30px;font-weight:600;line-height:1.1}
+.unit{font-size:13px;color:#8a93a5;font-weight:400}
+pre.body{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.55;color:#c6cdd9;
+background:#0f131b;border:1px solid #232a38;border-radius:8px;padding:10px;max-height:260px;overflow:auto;margin:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+td{padding:6px 8px;border-bottom:1px solid #232a38;vertical-align:top}
+.nowrap{white-space:nowrap;color:#8a93a5}
+.conf{color:#5b6473}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:#4ade80}
+.dot.off{background:#f87171}
+footer{margin-top:20px;color:#5b6473;font-size:11px}
+</style></head><body>
+<h1>🧠 记忆织网面板</h1>
+<div class="sub">刷新于 __TIME__ · 每 10 秒自动刷新 · memfab 服务 __SVC__ · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
+<div class="grid">__STATS_CARDS__</div>
+<h1 style="font-size:16px;margin-top:10px">长期记忆</h1>
+__MEM_CARDS__
+<h1 style="font-size:16px;margin-top:10px">最近屏幕观察（OCR）</h1>
+<div class="card" style="overflow-x:auto"><table>__OBS_ROWS__</table></div>
+<footer>NanoKVM Memory Fabric · 数据源 /var/lib/memfab · 仅限局域网访问</footer>
+</body></html>
