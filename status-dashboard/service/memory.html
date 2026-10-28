@@ -76,6 +76,21 @@ __MEM_CARDS__
 <script>
 const STAGE = {timeline:"时间线整理", reducer:"长期记忆归约", compact:"记忆压缩"};
 function fmt(n){return (n||0).toLocaleString("en-US")}
+function relTime(t){
+  if(!t||t==="--")return t||"--";
+  const d=new Date(t.replace(" ","T"));
+  if(isNaN(d))return t;
+  const s=Math.floor((Date.now()-d.getTime())/1000);
+  if(s<0)return "刚刚";
+  if(s<60)return s+" 秒前";
+  if(s<3600)return Math.floor(s/60)+" 分钟前";
+  if(s<86400)return Math.floor(s/3600)+" 小时前";
+  return Math.floor(s/86400)+" 天前";
+}
+function toggleTime(el){
+  const cur=el.textContent, full=el.dataset.full;
+  el.textContent=el.dataset.alt||full; el.dataset.alt=cur;
+}
 async function openDrawer(){
   document.getElementById("drawerMask").style.display="block";
   document.getElementById("drawer").classList.add("open");
@@ -99,7 +114,7 @@ async function openDrawer(){
     <div class="dcell" style="margin-bottom:10px"><div class="lbl">模型</div><div class="val" style="font-size:14px;word-break:break-all">${s.model}</div>
       <div class="hint">经 llm-proxy → LM Studio</div></div>
     <div class="dgrid">
-      <div class="dcell"><div class="lbl">上次对话</div><div class="val" style="font-size:13px">${s.last_time}</div><div class="hint">${stage} · ${ok} · ${dur}</div></div>
+      <div class="dcell"><div class="lbl">上次对话</div><div class="val" style="font-size:13px"><span style="cursor:pointer;border-bottom:1px dashed #8a93a5" title="点击显示具体时间" onclick="toggleTime(this)" data-full="${s.last_time}">${relTime(s.last_time)}</span></div><div class="hint">${stage} · ${ok} · ${dur}</div></div>
       <div class="dcell"><div class="lbl">今日 / 累计对话</div><div class="val">${fmt(s.today_calls)} <span class="hint">/ ${fmt(s.total_calls)} 次</span></div></div>
       <div class="dcell" style="grid-column:1/-1"><div class="lbl">累计 Token 消耗</div><div class="val">${fmt(s.total_tokens)}</div>
         <div class="hint">输入 ${fmt(s.prompt_tokens)} / 输出 ${fmt(s.completion_tokens)}</div></div>
