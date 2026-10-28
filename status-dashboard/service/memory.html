@@ -2,7 +2,6 @@
 <html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>记忆织网面板 · NanoKVM-Go+</title>
-<meta http-equiv="refresh" content="10">
 <style>
 body{font-family:system-ui,'Segoe UI',sans-serif;background:#0b0e14;color:#e6e9ef;margin:0;padding:24px}
 h1{font-size:20px;margin:0 0 4px} h1.sec{font-size:16px;margin-top:18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -27,9 +26,9 @@ td{padding:6px 8px;border-bottom:1px solid #232a38;vertical-align:top}
 .badge.note{background:#1c2333;color:#8a93a5;border:1px solid #2a3550;font-weight:400}
 footer{margin-top:20px;color:#5b6473;font-size:11px}
 .ok{color:#4ade80}.bad{color:#f87171}
-/* 模型状态抽屉 */
-#modelBtn{position:fixed;right:20px;bottom:20px;z-index:50;background:#3b2f63;color:#c4b1ff;border:1px solid #5b4894;
-border-radius:24px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+/* 模型状态按钮：悬浮于"长期记忆"标题行右侧 */
+#modelBtn{margin-left:auto;background:#3b2f63;color:#c4b1ff;border:1px solid #5b4894;
+border-radius:16px;padding:4px 14px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4);white-space:nowrap}
 #modelBtn:hover{background:#4a3b7d}
 #drawerMask{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90;display:none}
 #drawer{position:fixed;top:0;right:-460px;width:440px;max-width:92vw;height:100vh;background:#10141d;border-left:1px solid #232a38;
@@ -57,7 +56,7 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
 <div class="sub">刷新于 __TIME__ · 每 10 秒自动刷新 · memfab 服务 __SVC__ · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
 <div class="grid">__STATS_CARDS__</div>
 
-<h1 class="sec">长期记忆 <span class="badge model">🤖 模型产出物</span> <span class="badge note">reducer 环节：会话时间线 → 摘要记忆</span></h1>
+<h1 class="sec">长期记忆 <span class="badge model">🤖 模型产出物</span> <span class="badge note">reducer 环节：会话时间线 → 摘要记忆</span><button id="modelBtn" onclick="openDrawer()">🤖 模型状态</button></h1>
 __MEM_CARDS__
 
 <h1 class="sec">最近屏幕观察（OCR） <span class="badge npu">⚡ NPU 离线识别 · 非大模型</span> <span class="badge note">时间线整理（timeline）环节同样由模型加工</span></h1>
@@ -65,7 +64,6 @@ __MEM_CARDS__
 
 <footer>NanoKVM Memory Fabric · 数据源 /var/lib/memfab · 仅限局域网访问</footer>
 
-<button id="modelBtn" onclick="openDrawer()">🤖 模型状态</button>
 <div id="drawerMask" onclick="closeDrawer()"></div>
 <div id="drawer">
   <span class="close" onclick="closeDrawer()">✕</span>
@@ -130,5 +128,11 @@ function closeDrawer(){
   document.getElementById("drawerMask").style.display="none";
   document.getElementById("drawer").classList.remove("open");
 }
+// 整页自动刷新：抽屉打开时暂停，关闭后恢复
+function drawerOpen(){
+  return document.getElementById("drawer").classList.contains("open")
+      || document.getElementById("drawerMask").style.display==="block";
+}
+setInterval(()=>{ if(!drawerOpen()) location.reload(); },10000);
 </script>
 </body></html>
