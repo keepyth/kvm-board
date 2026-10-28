@@ -190,8 +190,86 @@ def snapshot_full():
     return s
 
 
+def memfab_llm_status():
+    """解析 llm-trace.jsonl：模型调用统计 + 最近一次对话详情。"""
+    info = {"model": "", "last_time": "--", "last_stage": "", "today_calls": 0,
+            "total_calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
+            "total_tokens": 0, "last_content": "", "last_request": "",
+            "last_response": "", "last_ok": True, "last_duration_ms": None}
+    path = os.path.join(MEMFAB, "logs", "llm-trace.jsonl")
+    if not os.path.isfile(path):
+        return info
+    today = time.strftime("%Y-%m-%d")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+                info["total_calls"] += 1
+                ts = e.get("timestamp", "")
+                if ts.startswith(today):
+                    info["today_calls"] += 1
+                content, usage = "", {}
+                raw = e.get("response_raw") or ""
+                parsed = None
+                try:
+                    parsed = json.loads(raw)
+                    content = parsed["choices"][0]["message"]["content"]
+                    usage = parsed.get("usage") or {}
+                except Exception:
+                    pass
+                info["prompt_tokens"] += usage.get("prompt_tokens", 0) or 0
+                info["completion_tokens"] += usage.get("completion_tokens", 0) or 0
+                info["total_tokens"] += usage.get("total_tokens", 0) or 0
+                info["last_time"] = ts[:19].replace("T", " ")
+                info["last_stage"] = e.get("stage", "")
+                info["model"] = e.get("model", info["model"])
+                info["last_content"] = content[:600]
+                info["last_request"] = e.get("request") or ""
+                info["last_response"] = parsed if parsed is not None else raw
+                info["last_ok"] = not e.get("error")
+                info["last_duration_ms"] = e.get("duration_ms")
+    except OSError:
+        pass
+    return info
+
+
 def esc(s):
     return html.escape(str(s))
+
+
+def render_model_section():
+    """模型工作状态卡片区（数据来自 llm-trace）。"""
+    s = memfab_llm_status()
+    if not s["model"]:
+        return '<div class="card"><div class="sub">暂无模型调用记录（llm-trace 未开启或无数据）</div></div>'
+    ok_badge = '<span class="ok">✓ 成功</span>' if s["last_ok"] else '<span class="bad">✗ 失败</span>'
+    dur = f"{s['last_duration_ms']}ms" if s["last_duration_ms"] is not None else "--"
+    last_content = esc(s["last_content"] or "(无文本返回)")
+    req_json = esc(json.dumps(s["last_request"], ensure_ascii=False, indent=2)[:4000]) if s["last_request"] else "(无)"
+    resp = s["last_response"]
+    resp_json = esc(json.dumps(resp, ensure_ascii=False, indent=2)[:6000]) if resp else "(无)"
+    stage_cn = {"timeline": "时间线整理", "reducer": "长期记忆归约", "compact": "记忆压缩"}.get(s["last_stage"], s["last_stage"] or "--")
+    return f'''<div class="grid">
+<div class="card"><h2>模型</h2><div class="big" style="font-size:15px;word-break:break-all">{esc(s["model"])}</div>
+<div class="sub">经 llm-proxy → LM Studio (192.168.110.71:1234)</div></div>
+<div class="card"><h2>上次对话</h2><div class="big" style="font-size:15px">{esc(s["last_time"])}</div>
+<div class="sub">{esc(stage_cn)} · {ok_badge} · 耗时 {dur}</div></div>
+<div class="card"><h2>今日对话</h2><div class="big">{s["today_calls"]}<span class="unit"> 次</span></div>
+<div class="sub">累计 {s["total_calls"]} 次</div></div>
+<div class="card"><h2>Token 消耗</h2><div class="big" style="font-size:22px">{s["total_tokens"]:,}<span class="unit"> tokens</span></div>
+<div class="sub">输入 {s["prompt_tokens"]:,} / 输出 {s["completion_tokens"]:,}</div></div>
+</div>
+<div class="card"><h2>上次对话内容（模型返回）</h2><pre class="body">{last_content}</pre></div>
+<details class="card"><summary>上次对话原始出/入参数（点击展开）</summary>
+<div class="kv"><b>请求 (request)：</b><pre class="body">{req_json}</pre>
+<b>响应 (response_raw)：</b><pre class="body">{resp_json}</pre></div>
+</details>'''
 
 
 def render_memory_page():
@@ -234,6 +312,7 @@ def render_memory_page():
     return (MEM_PAGE
             .replace("__STATS_CARDS__", stat_cards)
             .replace("__SVC__", svc)
+            .replace("__MODEL_SECTION__", render_model_section())
             .replace("__MEM_CARDS__", mem_cards)
             .replace("__OBS_ROWS__", obs_rows)
             .replace("__TIME__", time.strftime("%Y-%m-%d %H:%M:%S")))
