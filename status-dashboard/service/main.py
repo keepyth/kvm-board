@@ -243,35 +243,6 @@ def esc(s):
     return html.escape(str(s))
 
 
-def render_model_section():
-    """模型工作状态卡片区（数据来自 llm-trace）。"""
-    s = memfab_llm_status()
-    if not s["model"]:
-        return '<div class="card"><div class="sub">暂无模型调用记录（llm-trace 未开启或无数据）</div></div>'
-    ok_badge = '<span class="ok">✓ 成功</span>' if s["last_ok"] else '<span class="bad">✗ 失败</span>'
-    dur = f"{s['last_duration_ms']}ms" if s["last_duration_ms"] is not None else "--"
-    last_content = esc(s["last_content"] or "(无文本返回)")
-    req_json = esc(json.dumps(s["last_request"], ensure_ascii=False, indent=2)[:4000]) if s["last_request"] else "(无)"
-    resp = s["last_response"]
-    resp_json = esc(json.dumps(resp, ensure_ascii=False, indent=2)[:6000]) if resp else "(无)"
-    stage_cn = {"timeline": "时间线整理", "reducer": "长期记忆归约", "compact": "记忆压缩"}.get(s["last_stage"], s["last_stage"] or "--")
-    return f'''<div class="grid">
-<div class="card"><h2>模型</h2><div class="big" style="font-size:15px;word-break:break-all">{esc(s["model"])}</div>
-<div class="sub">经 llm-proxy → LM Studio (192.168.110.71:1234)</div></div>
-<div class="card"><h2>上次对话</h2><div class="big" style="font-size:15px">{esc(s["last_time"])}</div>
-<div class="sub">{esc(stage_cn)} · {ok_badge} · 耗时 {dur}</div></div>
-<div class="card"><h2>今日对话</h2><div class="big">{s["today_calls"]}<span class="unit"> 次</span></div>
-<div class="sub">累计 {s["total_calls"]} 次</div></div>
-<div class="card"><h2>Token 消耗</h2><div class="big" style="font-size:22px">{s["total_tokens"]:,}<span class="unit"> tokens</span></div>
-<div class="sub">输入 {s["prompt_tokens"]:,} / 输出 {s["completion_tokens"]:,}</div></div>
-</div>
-<div class="card"><h2>上次对话内容（模型返回）</h2><pre class="body">{last_content}</pre></div>
-<details class="card"><summary>上次对话原始出/入参数（点击展开）</summary>
-<div class="kv"><b>请求 (request)：</b><pre class="body">{req_json}</pre>
-<b>响应 (response_raw)：</b><pre class="body">{resp_json}</pre></div>
-</details>'''
-
-
 def render_memory_page():
     st = memfab_stats()
     mems = memfab_memories()
@@ -312,7 +283,6 @@ def render_memory_page():
     return (MEM_PAGE
             .replace("__STATS_CARDS__", stat_cards)
             .replace("__SVC__", svc)
-            .replace("__MODEL_SECTION__", render_model_section())
             .replace("__MEM_CARDS__", mem_cards)
             .replace("__OBS_ROWS__", obs_rows)
             .replace("__TIME__", time.strftime("%Y-%m-%d %H:%M:%S")))
@@ -324,6 +294,10 @@ class Handler(BaseHTTPRequestHandler):
             path = self.path.split("?")[0]
             if path == "/api/status":
                 body = json.dumps(snapshot_full()).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+            elif path == "/api/model-status":
+                body = json.dumps(memfab_llm_status(), ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
             elif path == "/api/memory":

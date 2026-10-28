@@ -15,9 +15,6 @@ a{color:#50aaff;text-decoration:none} a:hover{text-decoration:underline}
 .unit{font-size:13px;color:#8a93a5;font-weight:400}
 pre.body{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.55;color:#c6cdd9;
 background:#0f131b;border:1px solid #232a38;border-radius:8px;padding:10px;max-height:260px;overflow:auto;margin:0}
-details.card summary{cursor:pointer;color:#a78bfa;font-size:13px;font-weight:600}
-details.card .kv{margin-top:10px;font-size:13px}
-details.card .kv b{color:#8a93a5;display:block;margin:8px 0 4px}
 table{width:100%;border-collapse:collapse;font-size:12px}
 td{padding:6px 8px;border-bottom:1px solid #232a38;vertical-align:top}
 .nowrap{white-space:nowrap;color:#8a93a5}
@@ -30,19 +27,82 @@ td{padding:6px 8px;border-bottom:1px solid #232a38;vertical-align:top}
 .badge.note{background:#1c2333;color:#8a93a5;border:1px solid #2a3550;font-weight:400}
 footer{margin-top:20px;color:#5b6473;font-size:11px}
 .ok{color:#4ade80}.bad{color:#f87171}
+/* 模型状态抽屉 */
+#modelBtn{position:fixed;right:20px;bottom:20px;z-index:50;background:#3b2f63;color:#c4b1ff;border:1px solid #5b4894;
+border-radius:24px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+#modelBtn:hover{background:#4a3b7d}
+#drawerMask{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90;display:none}
+#drawer{position:fixed;top:0;right:-460px;width:440px;max-width:92vw;height:100vh;background:#10141d;border-left:1px solid #232a38;
+z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:border-box}
+#drawer.open{right:0}
+#drawer h3{margin:0 0 4px;font-size:16px}
+#drawer .close{position:absolute;top:14px;right:16px;color:#8a93a5;cursor:pointer;font-size:20px}
+#drawer details{margin:10px 0}
+#drawer details summary{cursor:pointer;color:#a78bfa;font-size:13px}
+#drawer .kv{font-size:13px;margin-top:8px}
+#drawer .kv b{color:#8a93a5;display:block;margin:8px 0 4px}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.dcell{background:#161a23;border:1px solid #232a38;border-radius:10px;padding:10px}
+.dcell .lbl{font-size:11px;color:#8a93a5;text-transform:uppercase;letter-spacing:.06em}
+.dcell .val{font-size:18px;font-weight:600;margin-top:2px}
+.dcell .hint{font-size:11px;color:#8a93a5;margin-top:2px}
 </style></head><body>
 <h1>🧠 记忆织网面板</h1>
 <div class="sub">刷新于 __TIME__ · 每 10 秒自动刷新 · memfab 服务 __SVC__ · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
 <div class="grid">__STATS_CARDS__</div>
 
-<h1 class="sec">🤖 模型工作状态 <span class="badge note">大模型只负责"理解与总结"， OCR 由 NPU 本地完成，不经过模型</span></h1>
-__MODEL_SECTION__
-
-<h1 class="sec">长期记忆 <span class="badge model">🤖 模型产出物</span> <span class="badge note">reducer 环节：会话时间线 → 摘要记忆（每 60 秒检查，会话结束时写入）</span></h1>
+<h1 class="sec">长期记忆 <span class="badge model">🤖 模型产出物</span> <span class="badge note">reducer 环节：会话时间线 → 摘要记忆</span></h1>
 __MEM_CARDS__
 
-<h1 class="sec">最近屏幕观察（OCR） <span class="badge npu">⚡ NPU 离线识别 · 非大模型</span> <span class="badge note">时间线整理环节（timeline，每分钟一次）同样由模型加工成条目</span></h1>
+<h1 class="sec">最近屏幕观察（OCR） <span class="badge npu">⚡ NPU 离线识别 · 非大模型</span> <span class="badge note">时间线整理（timeline）环节同样由模型加工</span></h1>
 <div class="card" style="overflow-x:auto"><table>__OBS_ROWS__</table></div>
 
-<footer>NanoKVM Memory Fabric · 数据源 /var/lib/memfab · 模型调用日志 llm-trace.jsonl · 仅限局域网访问</footer>
+<footer>NanoKVM Memory Fabric · 数据源 /var/lib/memfab · 仅限局域网访问</footer>
+
+<button id="modelBtn" onclick="openDrawer()">🤖 模型状态</button>
+<div id="drawerMask" onclick="closeDrawer()"></div>
+<div id="drawer">
+  <span class="close" onclick="closeDrawer()">✕</span>
+  <h3>🤖 模型工作状态</h3>
+  <div class="sub" style="margin-bottom:12px">大模型只负责"理解与总结"，OCR 由 NPU 本地完成</div>
+  <div id="drawerBody"><div class="sub">加载中…</div></div>
+</div>
+<script>
+const STAGE = {timeline:"时间线整理", reducer:"长期记忆归约", compact:"记忆压缩"};
+function fmt(n){return (n||0).toLocaleString("en-US")}
+async function openDrawer(){
+  document.getElementById("drawerMask").style.display="block";
+  document.getElementById("drawer").classList.add("open");
+  const b=document.getElementById("drawerBody");
+  b.innerHTML='<div class="sub">加载中…</div>';
+  try{
+    const s=await (await fetch("/api/model-status")).json();
+    if(!s.model){b.innerHTML='<div class="sub">暂无模型调用记录</div>';return}
+    const ok=s.last_ok?'<span class="ok">✓ 成功</span>':'<span class="bad">✗ 失败</span>';
+    const stage=STAGE[s.last_stage]||s.last_stage||"--";
+    const dur=s.last_duration_ms!=null?s.last_duration_ms+"ms":"--";
+    let req="(", resp="无)";
+    try{req=JSON.stringify(s.last_request,null,2).slice(0,4000)}catch(e){}
+    try{resp=typeof s.last_response==="string"?s.last_response:JSON.stringify(s.last_response,null,2);resp=resp.slice(0,6000)}catch(e){}
+    b.innerHTML=`
+    <div class="dcell" style="margin-bottom:10px"><div class="lbl">模型</div><div class="val" style="font-size:14px;word-break:break-all">${s.model}</div>
+      <div class="hint">经 llm-proxy → LM Studio</div></div>
+    <div class="dgrid">
+      <div class="dcell"><div class="lbl">上次对话</div><div class="val" style="font-size:13px">${s.last_time}</div><div class="hint">${stage} · ${ok} · ${dur}</div></div>
+      <div class="dcell"><div class="lbl">今日 / 累计对话</div><div class="val">${fmt(s.today_calls)} <span class="hint">/ ${fmt(s.total_calls)} 次</span></div></div>
+      <div class="dcell" style="grid-column:1/-1"><div class="lbl">累计 Token 消耗</div><div class="val">${fmt(s.total_tokens)}</div>
+        <div class="hint">输入 ${fmt(s.prompt_tokens)} / 输出 ${fmt(s.completion_tokens)}</div></div>
+    </div>
+    <div class="kv"><b>上次对话内容（模型返回）</b><pre class="body">${(s.last_content||"(无文本返回)").replace(/</g,"&lt;")}</pre>
+    <details><summary>上次对话原始出/入参数（点击展开）</summary>
+      <b>请求 (request)：</b><pre class="body" style="max-height:300px">${req.replace(/</g,"&lt;")}</pre>
+      <b>响应 (response)：</b><pre class="body" style="max-height:300px">${resp.replace(/</g,"&lt;")}</pre>
+    </details></div>`;
+  }catch(e){b.innerHTML='<div class="bad">加载失败: '+e+'</div>'}
+}
+function closeDrawer(){
+  document.getElementById("drawerMask").style.display="none";
+  document.getElementById("drawer").classList.remove("open");
+}
+</script>
 </body></html>
