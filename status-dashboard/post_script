@@ -6,8 +6,7 @@ APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEST=/opt/status-dashboard
 
 mkdir -p "$DEST"
-cp "$APP_DIR/service/main.py" "$DEST/main.py"
-cp "$APP_DIR/service/page.html" "$DEST/page.html"
+cp "$APP_DIR/service/"*.py "$APP_DIR/service/"*.html "$DEST/"
 
 cat > /etc/systemd/system/nanokvm-status.service <<UNIT
 [Unit]
