@@ -139,8 +139,19 @@ def memfab_memories(limit=12):
     return out
 
 
-def memfab_observations(limit=25):
-    """读取 observation-buffer 最新 N 条 OCR 观察，倒序返回。"""
+def utc_to_local(ts):
+    """把 memfab 存的 UTC 时间戳转成本地时间字符串。"""
+    try:
+        import calendar
+        base = ts[:19]
+        t = time.strptime(base, "%Y-%m-%dT%H:%M:%S")
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(calendar.timegm(t)))
+    except Exception:
+        return (ts or "")[:19].replace("T", " ")
+
+
+def memfab_observations(limit=40):
+    """读取 observation-buffer 最新 N 条 OCR 观察，倒序返回（含引擎、字数、全文）。"""
     out = []
     d = os.path.join(MEMFAB, "observation-buffer")
     if not os.path.isdir(d):
@@ -155,11 +166,19 @@ def memfab_observations(limit=25):
             continue
         ocr = j.get("ocr") or {}
         ctx = j.get("context") or {}
+        src = j.get("source") or {}
+        ev = j.get("event") or {}
+        meta = ev.get("meta") or {}
+        text = ocr.get("text", "") or ""
         out.append({
-            "time": (j.get("captured_at") or "")[:19].replace("T", " "),
+            "time": utc_to_local(j.get("captured_at") or ""),
             "app": ctx.get("app_name", ""),
             "title": ctx.get("title", ""),
-            "text": ocr.get("text", ""),
+            "engine": src.get("engine", "unknown"),
+            "text": text[:30000],
+            "chars": meta.get("chars") or len(text),
+            "duration_ms": meta.get("duration_ms"),
+            "split": meta.get("split", ""),
             "confidence": ocr.get("confidence"),
         })
     out.reverse()
@@ -273,6 +292,24 @@ def esc(s):
     return html.escape(str(s))
 
 
+def rel_time(ts):
+    """本地时间字符串 → 'xx 秒/分钟/小时前'，供点击切换完整时间。"""
+    try:
+        t = time.mktime(time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
+        s = int(time.time() - t)
+        if s < 0:
+            return "刚刚"
+        if s < 60:
+            return f"{s} 秒前"
+        if s < 3600:
+            return f"{s // 60} 分钟前"
+        if s < 86400:
+            return f"{s // 3600} 小时前"
+        return f"{s // 86400} 天前"
+    except Exception:
+        return ts
+
+
 def render_memory_page():
     st = memfab_stats()
     mems = memfab_memories()
@@ -300,21 +337,34 @@ def render_memory_page():
                       f'<div class="sub">{desc} · 更新于 {upd} · 标签: {tags}</div>'
                       f'<pre class="body">{esc(m["body"])}</pre></div>')
 
-    obs_rows = ""
+    obs_cards = ""
     if not obs:
-        obs_rows = '<tr><td colspan="3">暂无观察记录</td></tr>'
-    for o in obs:
-        conf = f"{o['confidence']:.2f}" if isinstance(o["confidence"], (int, float)) else "--"
-        text = esc(o["text"][:160])
-        obs_rows += (f'<tr><td class="nowrap">{esc(o["time"])}</td>'
-                     f'<td class="nowrap">{esc(o["app"])} · {esc(o["title"])}</td>'
-                     f'<td>{text}<span class="conf"> ({conf})</span></td></tr>')
+        obs_cards = '<div class="card"><div class="sub">暂无观察记录</div></div>'
+    for i, o in enumerate(obs):
+        engine = o.get("engine", "")
+        if engine == "tesseract_local":
+            badge = '<span class="badge tess">⚙ 本地全文 v2</span>'
+        elif engine == "nano_ocr_npu":
+            badge = '<span class="badge npu">⚡ NPU 快速</span>'
+        else:
+            badge = f'<span class="badge note">{esc(engine)}</span>'
+        dur = o.get("duration_ms")
+        dur_txt = f" · {dur/1000:.0f}s" if isinstance(dur, (int, float)) else ""
+        split = f" · {esc(o['split'])}" if o.get("split") else ""
+        conf = o.get("confidence")
+        conf_txt = f" · 置信度 {conf:.2f}" if isinstance(conf, (int, float)) else ""
+        t = esc(o["time"])
+        obs_cards += (
+            f'<div class="card{" latest" if i == 0 and engine == "tesseract_local" else ""}">'
+            f'<div class="obshead"><span class="ot" data-full="{t}" onclick="toggleTime(this)">{esc(rel_time(o["time"]))}</span>'
+            f'{badge}<span class="conf">{esc(o["app"])} · {o["chars"]} 字{dur_txt}{split}{conf_txt}</span></div>'
+            f'<pre class="body full">{esc(o["text"])}</pre></div>')
 
     return (MEM_PAGE
             .replace("__STATS_CARDS__", stat_cards)
             .replace("__SVC__", svc)
             .replace("__MEM_CARDS__", mem_cards)
-            .replace("__OBS_ROWS__", obs_rows)
+            .replace("__OBS_CARDS__", obs_cards)
             .replace("__TIME__", time.strftime("%Y-%m-%d %H:%M:%S")))
 
 
