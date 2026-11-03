@@ -114,6 +114,27 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
 .flowcard summary .hint{font-size:11.5px;color:#8a93a5}
 .flowcard[open] summary{margin-bottom:4px;border-bottom:1px solid #232a38;padding-bottom:10px}
 .flowbody{margin-top:10px}
+/* 依赖安装说明：默认收起 */
+.doc h3{font-size:13px;margin:18px 0 6px;color:#e6e9ef}
+.doc p,.doc li{font-size:12.5px;color:#a9b2c3;line-height:1.85}
+.doc ol,.doc ul{padding-left:20px;margin:6px 0}
+.doc code{background:#202737;color:#e6c98a;padding:2px 6px;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.doc pre{background:#0f131c;border:1px solid #232a38;border-radius:6px;padding:10px 12px;overflow-x:auto;color:#cfd6e4;font-size:12px;line-height:1.75;margin:8px 0}
+.doc pre code{background:none;color:inherit;padding:0}
+.doc .warn{color:#e0b07a}
+.doc .tip{color:#8a93a5;font-size:11.5px}
+.dep{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid #232a38;border-radius:6px;margin:6px 0;font-size:12.5px;background:#151a24;flex-wrap:wrap}
+.dep-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dep.ok .dep-dot{background:#2f9b6d}
+.dep.off .dep-dot{background:#c05a5a}
+.dep b{min-width:82px;color:#e6e9ef}
+.dep-desc{color:#8a93a5;flex:1}
+.dep-state{font-weight:600}
+.dep.ok .dep-state{color:#7fd3ac}
+.dep.off .dep-state{color:#eaa0a0}
+.dep-banner{padding:8px 12px;border-radius:6px;margin:8px 0;font-size:12.5px}
+.dep-banner.ok{background:rgba(47,155,109,.12);color:#7fd3ac;border:1px solid rgba(47,155,109,.3)}
+.dep-banner.off{background:rgba(192,90,90,.12);color:#eaa0a0;border:1px solid rgba(192,90,90,.3)}
 </style></head><body>
 <h1>🧠 记忆织网面板</h1>
 <div class="sub">刷新于 <span id="updTime">__TIME__</span> · 每 10 秒自动更新（局部刷新，鼠标悬停在卡片上或抽屉/弹窗打开时暂停） · memfab 服务 <span id="svcState">__SVC__</span> · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
@@ -198,6 +219,41 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
     <p><b>关于「东山若」：</b>该错字出现在 <b>[1] NPU OCR</b> 写入原始层的记录里（<b>ID#63/64/81/82/84/88</b>，engine=nano_ocr_npu），而同期 tesseract（ID#65、#85）识别为「东山精密」。</p>
     <p>模型 [4][5] 只把原始层里的错字当上下文照抄，<b>既不主动改写、也不会纠正</b>——错字只能从上游 OCR 进入。所以要紧的是上游 OCR 选型，不是模型。</p>
   </div>
+  </div>
+</details>
+
+<details class="card flowcard" id="depCard">
+  <summary><b style="font-size:14px">📦 依赖安装与环境说明</b><span class="hint">页面只读数据，不负责安装 · 点击查看依赖状态、一键命令与手动步骤</span></summary>
+  <div class="flowbody doc">
+    <p>本面板是<b>只读展示层</b>：数据由原厂 memfab（记忆织网）、tesseract OCR 与模型代理产生。从应用商店安装时通常只装好了页面服务本身，其余组件由应用包自带的 <code>install_deps.sh</code> 一并安装。</p>
+
+    <h3>当前依赖状态（每 10 秒自动更新）</h3>
+    <div id="depsWrap">__DEPS__</div>
+
+    <h3>一、一键安装（推荐）</h3>
+    <p>SSH 登录设备，用 <b>root</b> 执行；<code>-p</code> 后面是网页 admin 密码，仅用于自动开启 MCP（模型上下文协议）截图凭据，不会写入文件：</p>
+    <pre><code>ssh root@&lt;KVM-IP&gt;
+sh /opt/status-dashboard/install_deps.sh -p '&lt;网页admin密码&gt;'</code></pre>
+    <p class="tip">可选：<code>-u 192.168.110.71:1234</code> 改局域网模型地址；<code>-i 180</code> 拉长 OCR 间隔（默认 120 秒）；<code>--no-ocr</code> 只装记忆链路、不启用 OCR。脚本执行完会逐项打印服务状态。</p>
+
+    <h3>二、应用安装脚本权限不足时怎么办</h3>
+    <p>应用商店的 <code>post_script</code> 可能运行在受限沙箱里，无法执行 <code>apt-get</code>、写 <code>/etc/systemd/system</code> 或调用网页接口。此时上方状态区会出现「应用商店安装脚本权限不足」提示，并在应用目录留下 <code>DEPS_INSTALL_REQUIRED</code> 标记。<b>绕开办法就是上面的一键命令</b>——脚本本身不依赖应用商店权限，只要 SSH 拿到 root 即可。</p>
+
+    <h3>三、逐项手动安装（连脚本都跑不了时）</h3>
+    <ol>
+      <li><b>开启 MCP</b>：网页 <code>设置 → AI → MCP</code> 打开开关，确认生成 <code>/etc/kvm/ai.json</code>。kvm-ocr 靠这个密钥截图，缺它 OCR 不工作。</li>
+      <li><b>开启原厂记忆织网</b>：网页 <code>设置 → AI → 记忆织网</code> 打开开关；或命令行 <code>systemctl enable --now memfab</code>。开启后自动生成 <code>/var/lib/memfab/config.toml</code>。</li>
+      <li><b>安装 OCR 依赖</b>：<code>apt-get update &amp;&amp; apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-chi-sim python3-pil</code>。</li>
+      <li><b>配置模型指向</b>：编辑 <code>/var/lib/memfab/config.toml</code>，在 <code>[models.default]</code> 设 <code>base_url = "http://127.0.0.1:1235/v1"</code>、<code>model = "mistralai/ministral-3-14b-reasoning"</code>；把 <code>[llm_trace] enabled</code> 设为 <code>true</code>、<code>[timeline] recent_context_blocks</code> 设为 <code>12</code>，然后 <code>systemctl restart memfab</code>。</li>
+      <li><b>启动服务</b>：<code>systemctl enable --now llm-proxy kvm-ocr nanokvm-status</code>。程序位于 <code>/opt/llm-proxy</code>、<code>/opt/kvm-ocr</code>、<code>/opt/status-dashboard</code>；systemd 单元可由 <code>install_deps.sh</code> 生成。</li>
+    </ol>
+
+    <h3>四、验证</h3>
+    <pre><code>systemctl is-active memfab llm-proxy kvm-ocr nanokvm-status
+curl -s http://127.0.0.1:8743/v1/observations | head -c 200
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8123/memory</code></pre>
+    <p class="warn">注意：本机内存约 246MB，OCR 与 4K 采集同时跑容易吃满交换分区。安装脚本默认把 <code>/opt/kvm-ocr/main.py</code> 的 <code>INTERVAL</code> 设为 120 秒；仍然吃紧时用 <code>-i 180</code> 重跑脚本，或用 <code>--no-ocr</code> 直接关闭 OCR。</p>
+    <p class="tip">上游模型需另有一台机器运行 LM Studio 并加载 ministral-3-14b-reasoning；设备本身跑不动大模型。</p>
   </div>
 </details>
 
@@ -361,6 +417,7 @@ async function ajaxRefresh(){
     setHtml("statsWrap",d.stats);
     setHtml("memWrap",d.mem);
     setHtml("obsWrap",d.obs);
+    setHtml("depsWrap",d.deps);
     const t=document.getElementById("updTime"); if(t) t.textContent=d.time;
     const s=document.getElementById("svcState"); if(s) s.innerHTML=d.svc;
     openMems.forEach(n=>{

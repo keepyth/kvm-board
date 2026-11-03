@@ -3,8 +3,8 @@
   "name": "Status Dashboard",
   "creator": "keepyth x WorkBuddy",
   "create_time": "2026-10-27",
-  "version": "1.0.0",
-  "desc": "Device status web dashboard at http://<kvm-ip>:8123 (installed as background service).",
+  "version": "1.1.0",
+  "desc": "Status dashboard + /memory panel. Installs memfab/MCP/tesseract/llm-proxy/kvm-ocr dependencies via install_deps.sh (falls back to on-page manual guide when sandbox permissions are insufficient).",
   "category": "tool",
   "post_script": "post_script"
 }

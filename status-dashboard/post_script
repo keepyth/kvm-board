@@ -1,12 +1,15 @@
 #!/bin/sh
-#!/bin/sh
-# Status Dashboard installer the web service as a systemd unit.
+# Status Dashboard 应用安装脚本
+# 1) 部署页面服务（8123）
+# 2) 一并安装 /memory 面板的全部依赖（memfab / MCP / tesseract / llm-proxy / kvm-ocr）
+#    若应用商店给的沙箱权限不足，写 DEPS_INSTALL_REQUIRED 标记，页面会提示改走 SSH root 手动执行。
 set -e
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEST=/opt/status-dashboard
 
 mkdir -p "$DEST"
-cp "$APP_DIR/service/"*.py "$APP_DIR/service/"*.html "$DEST/"
+cp "$APP_DIR/service/"*.py "$APP_DIR/service/"*.html "$APP_DIR/service/"*.sh "$DEST/"
+chmod +x "$DEST/install_deps.sh"
 
 cat > /etc/systemd/system/nanokvm-status.service <<UNIT
 [Unit]
@@ -24,4 +27,16 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable --now nanokvm-status
-echo "Status Dashboard installed: http://<kvm-ip>:8123"
+
+# 依赖安装需要 root + apt-get + 写 /etc/systemd/system；应用商店沙箱可能不给这些权限。
+if [ "$(id -u)" = "0" ]; then
+  timeout 300 sh "$DEST/install_deps.sh" > /tmp/install_deps.log 2>&1 \
+    || touch "$DEST/DEPS_INSTALL_REQUIRED"
+else
+  touch "$DEST/DEPS_INSTALL_REQUIRED" 2>/dev/null || true
+fi
+
+echo "Status Dashboard installed: http://<kvm-ip>:8123/memory"
+echo "依赖安装日志: /tmp/install_deps.log"
+[ -f "$DEST/DEPS_INSTALL_REQUIRED" ] && \
+  echo "部分依赖未装好：展开 /memory 页面「依赖安装与环境说明」按手动步骤执行。" || true

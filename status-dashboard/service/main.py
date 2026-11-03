@@ -6,6 +6,9 @@ import html
 import json
 import os
 import re
+import shutil
+import socket
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -114,6 +117,93 @@ def memfab_stats():
         "mem_count": n_mem,
         "memfab_up": os.system("systemctl is-active --quiet memfab 2>/dev/null") == 0,
     }
+
+
+_DEPS_CACHE = {"ts": 0.0, "data": None}
+
+
+def _svc_up(name):
+    return os.system("systemctl is-active --quiet %s 2>/dev/null" % name) == 0
+
+
+def deps_status():
+    """/memory 面板所依赖的组件是否就绪（结果缓存 30 秒，避免每轮 AJAX 反复探测）。"""
+    now = time.time()
+    if _DEPS_CACHE["data"] is not None and now - _DEPS_CACHE["ts"] < 30:
+        return _DEPS_CACHE["data"]
+
+    def has_tess():
+        if not shutil.which("tesseract"):
+            return False
+        try:
+            r = subprocess.run(["tesseract", "--list-langs"], capture_output=True,
+                               text=True, timeout=5)
+            return "chi_sim" in (r.stdout + r.stderr)
+        except Exception:
+            return False
+
+    def has_pil():
+        try:
+            import PIL  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    def port_open(host, port):
+        try:
+            s = socket.create_connection((host, port), 1.0)
+            s.close()
+            return True
+        except Exception:
+            return False
+
+    d = {
+        "dashboard": True,
+        "memfab": _svc_up("memfab"),
+        "mcp_key": os.path.isfile("/etc/kvm/ai.json") and os.path.getsize("/etc/kvm/ai.json") > 0,
+        "tesseract": has_tess(),
+        "pillow": has_pil(),
+        "llm_proxy": _svc_up("llm-proxy"),
+        "kvm_ocr": _svc_up("kvm-ocr"),
+        "upstream": port_open("192.168.110.71", 1234),
+        "installer": os.path.isfile(os.path.join(BASE, "install_deps.sh")),
+        "manual_required": os.path.isfile(os.path.join(BASE, "DEPS_INSTALL_REQUIRED")),
+    }
+    _DEPS_CACHE.update(ts=now, data=d)
+    return d
+
+
+DEP_LABELS = [
+    ("dashboard", "页面服务", "nanokvm-status · 8123"),
+    ("memfab", "记忆织网", "原厂 /usr/bin/memfab · systemd memfab"),
+    ("mcp_key", "MCP 密钥", "/etc/kvm/ai.json · kvm-ocr 截图凭据"),
+    ("tesseract", "OCR 引擎", "tesseract-ocr + tesseract-ocr-chi-sim"),
+    ("pillow", "图像处理", "python3-pil（Pillow）"),
+    ("llm_proxy", "模型代理", "llm-proxy · 127.0.0.1:1235"),
+    ("kvm_ocr", "屏幕识别", "kvm-ocr · 写入 observation-buffer"),
+    ("upstream", "局域网模型", "192.168.110.71:1234 · LM Studio"),
+]
+
+
+def render_deps_html():
+    d = deps_status()
+    rows = []
+    for key, name, desc in DEP_LABELS:
+        ok = d.get(key, False)
+        rows.append(
+            '<div class="dep %s"><span class="dep-dot"></span>'
+            '<b>%s</b><span class="dep-desc">%s</span>'
+            '<span class="dep-state">%s</span></div>' %
+            ("ok" if ok else "off", name, desc, "就绪" if ok else "缺失"))
+    missing = sum(1 for k, _, _ in DEP_LABELS if not d.get(k, False))
+    banner = ('<div class="dep-banner ok">✅ 全部依赖就绪</div>' if missing == 0 else
+              '<div class="dep-banner off">⚠️ 有 %d 项依赖未就绪 —— 展开下方安装步骤处理</div>' % missing)
+    if d.get("manual_required"):
+        banner += ('<div class="dep-banner off">应用商店安装脚本权限不足，'
+                   '请按下面「手动安装（SSH root）」执行。</div>')
+    if not d.get("installer"):
+        banner += '<div class="dep-banner off">未找到 install_deps.sh，请从应用源重新安装应用。</div>'
+    return banner + "".join(rows)
 
 
 def fmt_bj(v):
@@ -473,7 +563,8 @@ def render_memory_fragments():
             "svc": svc,
             "stats": stat_cards,
             "mem": mem_cards,
-            "obs": obs_cards}
+            "obs": obs_cards,
+            "deps": render_deps_html()}
 
 
 def render_memory_page():
@@ -483,6 +574,7 @@ def render_memory_page():
             .replace("__SVC__", frag["svc"])
             .replace("__MEM_CARDS__", frag["mem"])
             .replace("__OBS_CARDS__", frag["obs"])
+            .replace("__DEPS__", frag["deps"])
             .replace("__TIME__", frag["time"]))
 
 
