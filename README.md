@@ -10,3 +10,6 @@
   每 60 秒经 MCP 截图 → 灰度 1.5x 放大 → 自适应分栏 → tesseract psm4 中文识别 → 写入 memfab
   observation-buffer（engine=`tesseract_local`）。v2 管线关键词召回 7/28 → 23/28（同一帧对比）。
   无视频信号（被控机睡眠/关机）时每 15 秒轻量重试并明确记日志。
+- **llm-proxy**：systemd `llm-proxy`（监听 127.0.0.1:1235，转发到 LM Studio）。除剥离 `response_format: json_object` 和 markdown 围栏外，
+  会向 system prompt 注入「中文专有名词逐字原样照抄」的保真指令，防止小模型把「东山精密」改写成「东山若」之类的错误。
+  配合 memfab 配置 `[models.default] model = "mistralai/ministral-3-14b-reasoning"`（中文保真优于 3B），`timeout_seconds = 180`。
