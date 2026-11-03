@@ -1,0 +1,34 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>截图存档 · NanoKVM-Go</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;padding:22px 26px 40px;background:#0f1218;color:#e6e9ef;font:14px/1.6 system-ui,"Segoe UI","PingFang SC",sans-serif}
+h1{font-size:19px;margin:0 0 4px;font-weight:650}
+.sub{color:#8a93a5;font-size:12.5px;margin-bottom:18px}
+.sub a{color:#7fb3e8;text-decoration:none}
+.sub a:hover{text-decoration:underline}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.live{margin:0 0 26px;border:1px solid #2a3344;border-radius:8px;overflow:hidden;background:#151a24}
+.livehead{padding:8px 12px;font-size:12.5px;color:#9aa6b8;border-bottom:1px solid #232a38;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.livehead a{color:#7fb3e8;text-decoration:none}
+.live img{display:block;width:100%;height:auto;max-height:560px;object-fit:contain;background:#0b0e13}
+.h2{font-size:13px;color:#8a93a5;font-weight:600;margin:0 0 10px;letter-spacing:.3px}
+.shot{display:block;text-decoration:none;color:#c9d2e2;background:#151a24;border:1px solid #232a38;border-radius:8px;overflow:hidden;transition:border-color .15s}
+.shot:hover{border-color:#3a4a66}
+.shot img{display:block;width:100%;height:auto;background:#0b0e13}
+.shot span{display:block;padding:7px 10px;font-size:12px;color:#8a93a5;font-variant-numeric:tabular-nums}
+.empty{padding:40px;border:1px dashed #2a3344;border-radius:8px;color:#8a93a5;text-align:center}
+.note{margin-top:18px;font-size:12px;color:#6f7787}
+</style></head><body>
+<h1>🖼 截图存档 · 原始画面</h1>
+<div class="sub">共 __COUNT__ 张 · 占用 __MB__ MB · 每张 1920×1080 JPEG（与入库 OCR 的 captured_at 一一对应） · 刷新于 __TIME__ · <a href="/memory">← 返回记忆面板</a> · <a href="/">状态面板</a></div>
+<div class="live">
+  <div class="livehead">📸 最近一轮抓帧（原始 1920×1080，不压缩、不缩放）<a href="/shot/live" target="_blank">新标签打开原图 ↗</a></div>
+  <a href="/shot/live" target="_blank"><img src="/shot/live?t=__TIME__" alt="最近抓帧"></a>
+</div>
+<h2 class="h2">历史归档（仅在 OCR 真正入库时留图）</h2>
+<div class="grid">__CARDS__</div>
+<p class="note">说明：截图由 kvm-ocr 在每次「真正入库」时留存，画面像素未变或文本重复的轮次不入库、不留图；最多保留 1200 张（约 300MB），超出自动删最旧。点击任一缩略图可看 1:1 原图。</p>
+</body></html>

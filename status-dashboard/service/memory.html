@@ -132,12 +132,22 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
 .dep-state{font-weight:600}
 .dep.ok .dep-state{color:#7fd3ac}
 .dep.off .dep-state{color:#eaa0a0}
+.shotlink{margin-left:auto;font-size:11.5px;color:#7fb3e8;text-decoration:none;border:1px solid #2b3b52;border-radius:5px;padding:1px 7px;background:#182131;flex:none}
+.shotlink:hover{background:#1e2a3d;border-color:#3d5673}
+.shotbig{display:block;margin:0 0 12px;text-decoration:none}
+.shotbig img{display:block;width:100%;max-height:340px;object-fit:contain;background:#0b0e13;border:1px solid #2a3344;border-radius:6px}
+.shotbig span{display:block;padding:5px 2px 0;font-size:11.5px;color:#7fb3e8}
+.dep.meminfo .dep-dot{background:#4a8fd0}
+.dep .dep-ok{color:#7fd3ac}
+.dep .dep-warn{color:#e8c076}
+.dep .dep-off{color:#eaa0a0}
+.dep.meminfo b{min-width:0}
 .dep-banner{padding:8px 12px;border-radius:6px;margin:8px 0;font-size:12.5px}
 .dep-banner.ok{background:rgba(47,155,109,.12);color:#7fd3ac;border:1px solid rgba(47,155,109,.3)}
 .dep-banner.off{background:rgba(192,90,90,.12);color:#eaa0a0;border:1px solid rgba(192,90,90,.3)}
 </style></head><body>
 <h1>🧠 记忆织网面板</h1>
-<div class="sub">刷新于 <span id="updTime">__TIME__</span> · 每 10 秒自动更新（局部刷新，鼠标悬停在卡片上或抽屉/弹窗打开时暂停） · memfab 服务 <span id="svcState">__SVC__</span> · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
+<div class="sub">刷新于 <span id="updTime">__TIME__</span> · 每 10 秒自动更新（局部刷新，鼠标悬停在卡片上或抽屉/弹窗打开时暂停） · memfab 服务 <span id="svcState">__SVC__</span> · <a href="/shots">🖼 截图存档</a> · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
 <div class="grid" id="statsWrap">__STATS_CARDS__</div>
 
 <details class="card flowcard" id="flowCard">
@@ -252,7 +262,8 @@ sh /opt/status-dashboard/install_deps.sh -p '&lt;网页admin密码&gt;'</code></
     <pre><code>systemctl is-active memfab llm-proxy kvm-ocr nanokvm-status
 curl -s http://127.0.0.1:8743/v1/observations | head -c 200
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8123/memory</code></pre>
-    <p class="warn">注意：本机内存约 246MB，OCR 与 4K 采集同时跑容易吃满交换分区。安装脚本默认把 <code>/opt/kvm-ocr/main.py</code> 的 <code>INTERVAL</code> 设为 120 秒；仍然吃紧时用 <code>-i 180</code> 重跑脚本，或用 <code>--no-ocr</code> 直接关闭 OCR。</p>
+    <div class="dep meminfo"><span class="dep-dot"></span><b>本机内存实况</b><span id="memInfoWrap">__MEMINFO__</span></div>
+    <p class="warn">OCR 与 4K 采集同时跑容易吃满交换分区。安装脚本默认把 <code>/opt/kvm-ocr/main.py</code> 的 <code>INTERVAL</code> 设为 120 秒；仍然吃紧时用 <code>-i 180</code> 重跑脚本，或用 <code>--no-ocr</code> 直接关闭 OCR。</p>
     <p class="tip">上游模型需另有一台机器运行 LM Studio 并加载 ministral-3-14b-reasoning；设备本身跑不动大模型。</p>
   </div>
 </details>
@@ -378,8 +389,10 @@ function showObs(el){
   const card=el.closest(".card");
   const head=card.querySelector(".obshead");
   const full=card.querySelector(".fulltext").textContent;
+  const shot=card.getAttribute("data-shot")||"";
   document.getElementById("obsModalTitle").innerHTML=head.innerHTML;
-  document.getElementById("obsModalBody").innerHTML=renderMd(full);
+  const img=shot?('<a class="shotbig" href="'+shot+'" target="_blank" title="点击看 1:1 原图"><img src="'+shot+'" alt="原始截图"><span>本帧原始截图 1920×1080 · 点击看 1:1 原图 ↗</span></a>'):"";
+  document.getElementById("obsModalBody").innerHTML=img+renderMd(full);
   document.getElementById("obsMask").style.display="block";
   document.getElementById("obsModal").style.display="flex";
 }
@@ -418,6 +431,7 @@ async function ajaxRefresh(){
     setHtml("memWrap",d.mem);
     setHtml("obsWrap",d.obs);
     setHtml("depsWrap",d.deps);
+    if(d.meminfo) setHtml("memInfoWrap",d.meminfo);
     const t=document.getElementById("updTime"); if(t) t.textContent=d.time;
     const s=document.getElementById("svcState"); if(s) s.innerHTML=d.svc;
     openMems.forEach(n=>{

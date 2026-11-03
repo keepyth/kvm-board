@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -18,9 +19,12 @@ ISO_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-
 
 WEB_PORT = 8123
 MEMFAB = "/var/lib/memfab"
+SHOTS_DIR = "/var/lib/kvm-ocr/shots"   # kvm-ocr 归档的原始截图（1920x1080）
+SHOT_RE = re.compile(r"^\d{8}T\d{6}Z\.jpg$")
 BASE = os.path.dirname(os.path.abspath(__file__))
 PAGE = open(os.path.join(BASE, "page.html"), encoding="utf-8").read()
 MEM_PAGE = open(os.path.join(BASE, "memory.html"), encoding="utf-8").read()
+SHOTS_PAGE = open(os.path.join(BASE, "shots.html"), encoding="utf-8").read()
 
 
 def read_cpu():
@@ -126,6 +130,82 @@ def _svc_up(name):
     return os.system("systemctl is-active --quiet %s 2>/dev/null" % name) == 0
 
 
+def shot_files():
+    """归档截图列表，新的在前。"""
+    try:
+        names = [n for n in os.listdir(SHOTS_DIR) if SHOT_RE.match(n)]
+    except OSError:
+        return []
+    return sorted(names, reverse=True)
+
+
+def shot_name_for(iso):
+    """captured_at '2026-11-03T06:17:22.000000Z' → '20261103T061722Z.jpg'"""
+    m = ISO_RE.search(str(iso or ""))
+    if not m:
+        return ""
+    return (m.group(1).replace("-", "") + "T" + m.group(2).replace(":", "") + "Z.jpg")
+
+
+def shot_url_for(iso):
+    """若该观察有对应归档截图则返回 URL，否则空串。"""
+    n = shot_name_for(iso)
+    if n and os.path.isfile(os.path.join(SHOTS_DIR, n)):
+        return "/shot?f=" + n
+    return ""
+
+
+def render_shots_page():
+    """截图存档图库：网格缩略 + 点击看原图。"""
+    items = shot_files()
+    cards, total_mb = [], 0.0
+    for n in items[:300]:
+        try:
+            total_mb += os.path.getsize(os.path.join(SHOTS_DIR, n)) / 1048576.0
+        except OSError:
+            pass
+        # 20261103T061722Z.jpg → 2026-11-03 14:17:22（北京时间）
+        try:
+            dt = datetime.strptime(n[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc).astimezone(BJ)
+            label = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            label = n
+        cards.append(
+            '<a class="shot" href="/shot?f=%s" target="_blank">'
+            '<img loading="lazy" src="/shot?f=%s" alt="%s">'
+            '<span>%s</span></a>' % (n, n, label, label))
+    if not cards:
+        cards.append('<div class="empty">暂无截图归档。新入库的 OCR 观察会自动存一张原图（每 '
+                     '180 秒最多一张）。</div>')
+    return (SHOTS_PAGE
+            .replace("__COUNT__", str(len(items)))
+            .replace("__MB__", "%.1f" % total_mb)
+            .replace("__CARDS__", "".join(cards))
+            .replace("__TIME__", time.strftime("%Y-%m-%d %H:%M:%S")))
+
+
+def mem_usage_info():
+    """读取本机真实内存：硬件总量（MemTotal+内核与硬件预留）与当前可用量。"""
+    info = {}
+    try:
+        for line in open("/proc/meminfo"):
+            k, _, v = line.partition(":")
+            info[k.strip()] = int(v.split()[0]) if v.split() else 0
+    except Exception:
+        return {"total_mb": 0, "avail_mb": 0}
+    total = info.get("MemTotal", 0)
+    # dmesg 里的 "Memory: X/262132K available" 才是物理焊死值，这里用 MemTotal 向上取整到常见规格
+    hw = 0
+    for step in (128, 256, 512, 1024, 2048):
+        if total * 1024 <= step * 1024 * 1024:
+            hw = step
+            break
+    return {"total_mb": round(total / 1024),
+            "avail_mb": round(info.get("MemAvailable", 0) / 1024),
+            "hw_mb": hw or round(total / 1024),
+            "swap_used_mb": round((info.get("SwapTotal", 0) - info.get("SwapFree", 0)) / 1024)}
+
+
 def deps_status():
     """/memory 面板所依赖的组件是否就绪（结果缓存 30 秒，避免每轮 AJAX 反复探测）。"""
     now = time.time()
@@ -204,6 +284,22 @@ def render_deps_html():
     if not d.get("installer"):
         banner += '<div class="dep-banner off">未找到 install_deps.sh，请从应用源重新安装应用。</div>'
     return banner + "".join(rows)
+
+
+def render_meminfo_html():
+    """本机内存实况：硬件规格 / 系统可用 / 预留 / swap 占用。"""
+    m = mem_usage_info()
+    if not m["total_mb"]:
+        return '<span class="dep-desc">内存信息读取失败</span>'
+    reserved = max(0, m["hw_mb"] - m["total_mb"])
+    swap = m["swap_used_mb"]
+    level = "ok" if m["avail_mb"] >= 80 else ("warn" if m["avail_mb"] >= 40 else "off")
+    return ('<span class="dep-desc">硬件焊死 <b>%(hw)d MB</b>（出厂固定，不可升级）'
+            ' · 内核与视频采集预留 %(res)d MB · 系统可见 <b>%(tot)d MB</b>'
+            ' · 当前可用 <b class="dep-%(lv)s">%(av)d MB</b>'
+            ' · swap 已用 %(sw)d MB</span>' %
+            {"hw": m["hw_mb"], "res": reserved, "tot": m["total_mb"],
+             "av": m["avail_mb"], "sw": swap, "lv": level})
 
 
 def fmt_bj(v):
@@ -349,9 +445,11 @@ def memfab_observations(limit=40):
         ev = j.get("event") or {}
         meta = ev.get("meta") or ocr.get("meta") or {}
         text = ocr.get("text", "") or ""
+        raw_ts = j.get("captured_at") or ""
         out.append({
             "id": pos,
-            "time": fmt_bj(j.get("captured_at") or ""),
+            "time": fmt_bj(raw_ts),
+            "shot": shot_url_for(raw_ts),
             "app": ctx.get("app_name", ""),
             "title": ctx.get("title", ""),
             "engine": src.get("engine", "unknown"),
@@ -550,12 +648,17 @@ def render_memory_fragments():
                        if ln.strip() and not re.match(r"^\s{0,3}(#{1,6}\s|>\s?|---+\s*$)", ln)]
         flat = " ".join(" ".join(plain_lines).split())
         preview = esc(flat[:110] + ("…" if len(flat) > 110 else ""))
+        shot = o.get("shot") or ""
+        shot_btn = (f'<a class="shotlink" href="{shot}" target="_blank" '
+                    f'onclick="event.stopPropagation()" title="打开本帧原始截图 1920×1080">🖼 原图</a>'
+                    if shot else "")
         obs_cards += (
-            f'<div class="card raw{lowq}{" latest" if i == 0 and engine == "tesseract_local" else ""}">'
+            f'<div class="card raw{lowq}{" latest" if i == 0 and engine == "tesseract_local" else ""}"'
+            f' data-shot="{shot}">'
             f'<span class="tag tag-raw">原始 · 引擎直出</span>'
             f'<div class="obshead"><span class="oid">ID#{o["id"]}</span>'
             f'<span class="ot" data-full="{t}" onclick="toggleTime(this)">{esc(rel_time(o["time"]))}</span>'
-            f'{badge}<span class="conf">{meta_txt}</span></div>'
+            f'{badge}<span class="conf">{meta_txt}</span>{shot_btn}</div>'
             f'<div class="preview" onclick="showObs(this)" title="点击查看完整识别内容">{preview}</div>'
             f'<pre class="fulltext" hidden>{esc(o["text"])}</pre></div>')
 
@@ -564,7 +667,8 @@ def render_memory_fragments():
             "stats": stat_cards,
             "mem": mem_cards,
             "obs": obs_cards,
-            "deps": render_deps_html()}
+            "deps": render_deps_html(),
+            "meminfo": render_meminfo_html()}
 
 
 def render_memory_page():
@@ -575,6 +679,7 @@ def render_memory_page():
             .replace("__MEM_CARDS__", frag["mem"])
             .replace("__OBS_CARDS__", frag["obs"])
             .replace("__DEPS__", frag["deps"])
+            .replace("__MEMINFO__", frag["meminfo"])
             .replace("__TIME__", frag["time"]))
 
 
@@ -606,6 +711,53 @@ class Handler(BaseHTTPRequestHandler):
                 body = render_memory_page().encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+            elif path == "/shots":
+                body = render_shots_page().encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+            elif path == "/shot/live":
+                # 最近一轮抓到的原始帧（每轮覆盖写，最多 INTERVAL 秒旧）
+                fp = "/var/lib/kvm-ocr/frame.jpg"
+                if not os.path.isfile(fp):
+                    self.send_response(404)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(b"no frame")
+                    return
+                body = open(fp, "rb").read()
+                mtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(fp)))
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Frame-Time", mtime)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            elif path == "/shot":
+                qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                name = (qs.get("f") or [""])[0]
+                if not SHOT_RE.match(name):
+                    self.send_response(400)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(b"bad name")
+                    return
+                fp = os.path.join(SHOTS_DIR, name)
+                if not os.path.isfile(fp):
+                    self.send_response(404)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(b"not found")
+                    return
+                body = open(fp, "rb").read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             else:
                 s = snapshot_full()
                 mt, mu = s["mem_total_kb"], s["mem_used_kb"]

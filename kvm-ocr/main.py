@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import time
@@ -24,7 +25,9 @@ INGEST_URL = "http://127.0.0.1:8743/v1/observations"
 FRAME = "/var/lib/kvm-ocr/frame.jpg"
 WORK_GRAY = "/var/lib/kvm-ocr/gray.png"
 STATE = "/var/lib/kvm-ocr/last_text"
-INTERVAL = 60          # 秒，一轮间隔（识别耗时超过则立刻进入下一轮）
+SHOTS = "/var/lib/kvm-ocr/shots"     # 入库观察的原始截图归档（与 captured_at 同名）
+KEEP_SHOTS = 1200                    # 最多保留张数（1920x1080 约 245KB/张 ≈ 300MB）
+INTERVAL = 180         # 秒，一轮间隔（install_deps.sh 的 -i 参数可覆盖）
 SCALE = 1.5            # 放大倍数：小字号识别必需
 PSM = "4"              # 单栏可变字号模式，对 UI 页面效果最好
 GUTTER_SEARCH = (0.45, 0.85)
@@ -264,6 +267,30 @@ def ocr_frame():
     return md, mode, total
 
 
+def shot_name(now):
+    """captured_at '2026-11-03T06:17:22.000000Z' → 归档名 '20261103T061722Z.jpg'"""
+    return now.replace("-", "").replace(":", "").split(".")[0] + "Z.jpg"
+
+
+def archive_shot(now):
+    """把本轮入库对应的原始截图留档，供网页按时间回溯查看清晰度。"""
+    try:
+        os.makedirs(SHOTS, exist_ok=True)
+        dst = os.path.join(SHOTS, shot_name(now))
+        shutil.copy2(FRAME, dst)
+        names = sorted(os.listdir(SHOTS))
+        if len(names) > KEEP_SHOTS:
+            for old in names[:len(names) - KEEP_SHOTS]:
+                try:
+                    os.remove(os.path.join(SHOTS, old))
+                except OSError:
+                    pass
+        return dst
+    except Exception as e:
+        log("截图归档失败: %s" % e)
+        return None
+
+
 def post(text, size, capture_id, mode, dur_ms, n_lines):
     now = time.strftime("%Y-%m-%dT%H:%M:%S.000000Z", time.gmtime())
     meta = {"pipeline": "v3-tsv-markdown", "split": mode,
@@ -282,7 +309,7 @@ def post(text, size, capture_id, mode, dur_ms, n_lines):
     req = urllib.request.Request(INGEST_URL, json.dumps(body, ensure_ascii=False).encode(),
                                  {"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read().decode()[:200]
+        return r.read().decode()[:200], now
 
 
 def main():
@@ -311,8 +338,9 @@ def main():
                     log("与上轮内容相同（相似度 %.2f），不入库" % ratio)
                 else:
                     cid = "ocr-%s-%d" % (h[:12], int(started))
-                    resp = post(text, Image.open(FRAME).size, cid, mode,
-                                int((time.time() - started) * 1000), n_lines)
+                    resp, stamp = post(text, Image.open(FRAME).size, cid, mode,
+                                       int((time.time() - started) * 1000), n_lines)
+                    archive_shot(stamp)
                     open(STATE, "w", encoding="utf-8").write(text)
                     last_text = text
                     log("已入库 %d 字 / %d 行 / 模式 %s / 耗时 %d 秒 / %s"
