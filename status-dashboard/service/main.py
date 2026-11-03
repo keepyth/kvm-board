@@ -5,8 +5,13 @@
 import html
 import json
 import os
+import re
 import time
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+BJ = timezone(timedelta(hours=8))
+ISO_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})?")
 
 WEB_PORT = 8123
 MEMFAB = "/var/lib/memfab"
@@ -111,12 +116,67 @@ def memfab_stats():
     }
 
 
+def fmt_bj(v):
+    """任意 ISO 时间 → 北京时间字符串 'YYYY-MM-DD HH:MM:SS'（不带 TZ）。
+    无偏移或 Z 视为 UTC；带 +08:00 等偏移时换算到北京时间。"""
+    s = str(v or "").strip()
+    m = ISO_RE.search(s)
+    if not m:
+        return s[:19] if s else "--"
+    date, tm, off = m.group(1), m.group(2), m.group(3)
+    try:
+        base = datetime.strptime(date + " " + tm, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return s[:19]
+    if off in (None, "Z", "+00:00", "-00:00"):
+        base = base.replace(tzinfo=timezone.utc).astimezone(BJ)
+    elif off not in ("+08:00", "+0800"):
+        sign = 1 if off[0] == "+" else -1
+        try:
+            delta = timedelta(hours=int(off[1:3]), minutes=int(off[4:6]))
+            base = base.replace(tzinfo=timezone(sign * delta)).astimezone(BJ)
+        except (ValueError, IndexError):
+            pass
+    return base.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def fmt_bj_text(s):
+    """把一段文本里出现的所有 ISO 时间统一替换为北京时间字符串。"""
+    return ISO_RE.sub(lambda m: fmt_bj(m.group(0)), str(s or ""))
+
+
+def obs_files():
+    """observation-buffer 全部 JSON 文件名，字典序即时间序（文件名是 UTC 时间戳）。"""
+    d = os.path.join(MEMFAB, "observation-buffer")
+    if not os.path.isdir(d):
+        return []
+    return sorted(f for f in os.listdir(d) if f.endswith(".json"))
+
+
+def obs_index():
+    """全量观察索引 [{id, dt(北京时间 datetime)}]，ID 为持久稳定的全局序号。"""
+    out = []
+    d = os.path.join(MEMFAB, "observation-buffer")
+    for i, name in enumerate(obs_files(), 1):
+        try:
+            with open(os.path.join(d, name), encoding="utf-8", errors="replace") as f:
+                j = json.load(f)
+            local = fmt_bj(j.get("captured_at") or "")
+            dt = datetime.strptime(local, "%Y-%m-%d %H:%M:%S")
+            out.append({"id": i, "dt": dt})
+        except Exception:
+            continue
+    return out
+
+
 def memfab_memories(limit=12):
-    """读取 /var/lib/memfab/memory/*.md（YAML frontmatter + 正文），按文件名倒序。"""
+    """读取 /var/lib/memfab/memory/*.md（YAML frontmatter + 正文），按文件名倒序。
+    附带溯源：从哪些 ID# 原始 OCR 中总结而来。"""
     out = []
     d = os.path.join(MEMFAB, "memory")
     if not os.path.isdir(d):
         return out
+    oidx = obs_index()
     for name in sorted(os.listdir(d), reverse=True)[:limit]:
         p = os.path.join(d, name)
         if not os.path.isfile(p):
@@ -135,30 +195,59 @@ def memfab_memories(limit=12):
                         k, v = line.split(":", 1)
                         meta[k.strip()] = v.strip()
                 body = parts[2]
-        out.append({"name": name, "meta": meta, "body": body.strip()[:2000]})
+        # 收集正文里每条记忆条目的时间戳（`## [时间]`），作为该条目覆盖的会话窗口
+        times = []
+        for m in ISO_RE.finditer(body):
+            try:
+                times.append(datetime.strptime(fmt_bj(m.group(0)), "%Y-%m-%d %H:%M:%S"))
+            except ValueError:
+                pass
+        src = ""
+        segs = []
+        for t in sorted(set(times)):
+            lo, hi = t - timedelta(minutes=20), t + timedelta(minutes=2)
+            ids = [o["id"] for o in oidx if lo <= o["dt"] <= hi]
+            if ids:
+                segs.append((min(ids), max(ids), lo, hi, len(ids)))
+        # 合并时间上重叠/相邻（<3 分钟）的段
+        merged = []
+        for s in segs:
+            if merged and s[2] <= merged[-1][3] + timedelta(minutes=3):
+                p = merged[-1]
+                merged[-1] = (min(p[0], s[0]), max(p[1], s[1]), p[2], max(p[3], s[3]), 0)
+            else:
+                merged.append(s)
+        if merged:
+            parts = []
+            for a, b, lo, hi, _ in merged[-2:]:
+                cnt = len([o for o in oidx if lo <= o["dt"] <= hi])
+                parts.append("从 ID#%d~#%d 中提取（%s ~ %s，约 %d 分钟，%d 条）" % (
+                    a, b, lo.strftime("%Y-%m-%d %H:%M:%S"), hi.strftime("%Y-%m-%d %H:%M:%S"),
+                    int((hi - lo).total_seconds() // 60), cnt))
+            if len(merged) > 2:
+                parts.insert(0, "共 %d 个时段，最近：" % len(merged))
+            src = "；".join(parts)
+        out.append({"name": name, "meta": meta, "body": fmt_bj_text(body.strip()[:4000]),
+                    "created": fmt_bj(meta.get("created", "")), "updated": fmt_bj(meta.get("updated", "")),
+                    "source": src,
+                    "id_range": ("ID#%d~#%d" % (merged[-1][0], merged[-1][1])) if merged else ""})
     return out
 
 
 def utc_to_local(ts):
-    """把 memfab 存的 UTC 时间戳转成本地时间字符串。"""
-    try:
-        import calendar
-        base = ts[:19]
-        t = time.strptime(base, "%Y-%m-%dT%H:%M:%S")
-        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(calendar.timegm(t)))
-    except Exception:
-        return (ts or "")[:19].replace("T", " ")
+    """兼容旧调用：统一交给 fmt_bj 输出北京时间字符串。"""
+    return fmt_bj(ts)
 
 
 def memfab_observations(limit=40):
-    """读取 observation-buffer 最新 N 条 OCR 观察，倒序返回（含引擎、字数、全文）。"""
+    """读取 observation-buffer 最新 N 条 OCR 观察，倒序返回（含全局 ID、引擎、字数、全文）。"""
     out = []
     d = os.path.join(MEMFAB, "observation-buffer")
     if not os.path.isdir(d):
         return out
-    for name in sorted(os.listdir(d))[-limit:]:
-        if not name.endswith(".json"):
-            continue
+    files = obs_files()
+    total = len(files)
+    for pos, name in enumerate(files[-limit:], start=max(0, total - limit) + 1):
         try:
             with open(os.path.join(d, name), encoding="utf-8", errors="replace") as f:
                 j = json.load(f)
@@ -168,10 +257,11 @@ def memfab_observations(limit=40):
         ctx = j.get("context") or {}
         src = j.get("source") or {}
         ev = j.get("event") or {}
-        meta = ev.get("meta") or {}
+        meta = ev.get("meta") or ocr.get("meta") or {}
         text = ocr.get("text", "") or ""
         out.append({
-            "time": utc_to_local(j.get("captured_at") or ""),
+            "id": pos,
+            "time": fmt_bj(j.get("captured_at") or ""),
             "app": ctx.get("app_name", ""),
             "title": ctx.get("title", ""),
             "engine": src.get("engine", "unknown"),
@@ -230,10 +320,10 @@ def extract_conv(e, content):
                     text = str(text)
             text = text.strip()
             if text:
-                conv.append({"role": m.get("role", "?"), "text": text[:1500]})
+                conv.append({"role": m.get("role", "?"), "text": fmt_bj_text(text[:1500])})
     content = (content or "").strip()
     if content:
-        conv.append({"role": "assistant", "text": content[:1500]})
+        conv.append({"role": "assistant", "text": fmt_bj_text(content[:1500])})
     return conv
 
 
@@ -274,7 +364,7 @@ def memfab_llm_status():
                 info["prompt_tokens"] += usage.get("prompt_tokens", 0) or 0
                 info["completion_tokens"] += usage.get("completion_tokens", 0) or 0
                 info["total_tokens"] += usage.get("total_tokens", 0) or 0
-                info["last_time"] = ts[:19].replace("T", " ")
+                info["last_time"] = fmt_bj(ts)
                 info["last_stage"] = e.get("stage", "")
                 info["model"] = e.get("model", info["model"])
                 info["last_content"] = content[:600]
@@ -331,11 +421,17 @@ def render_memory_page():
     for m in mems:
         meta = m["meta"]
         desc = esc(meta.get("description", ""))
-        upd = esc(meta.get("updated", ""))
         tags = esc(meta.get("tags", "").strip("[]"))
-        mem_cards += (f'<div class="card"><h2>{esc(m["name"])}</h2>'
-                      f'<div class="sub">{desc} · 更新于 {upd} · 标签: {tags}</div>'
-                      f'<pre class="body">{esc(m["body"])}</pre></div>')
+        src = esc(m["source"]) if m["source"] else "暂无可关联的原始观察"
+        idbadge = f'<span class="ids">{esc(m["id_range"])}</span>' if m.get("id_range") else ""
+        mem_cards += (
+            f'<div class="card memcard"><div class="memhead" onclick="toggleMem(this)">'
+            f'<span class="fname">📄 {esc(m["name"])}</span>{idbadge}'
+            f'<span class="caret">▸</span></div>'
+            f'<div class="membody" hidden>'
+            f'<div class="src">🔗 来源：{src}</div>'
+            f'<div class="sub" style="margin:6px 0 8px">{desc} · 创建于 {esc(m["created"])} · 更新于 {esc(m["updated"])} · 标签: {tags}</div>'
+            f'<pre class="body">{esc(m["body"])}</pre></div></div>')
 
     obs_cards = ""
     if not obs:
@@ -343,7 +439,7 @@ def render_memory_page():
     for i, o in enumerate(obs):
         engine = o.get("engine", "")
         if engine == "tesseract_local":
-            badge = '<span class="badge tess">⚙ 本地全文 v2</span>'
+            badge = '<span class="badge tess">⚙ 本地结构化 v3</span>'
         elif engine == "nano_ocr_npu":
             badge = '<span class="badge npu">⚡ NPU 快速</span>'
         else:
@@ -355,11 +451,15 @@ def render_memory_page():
         conf_txt = f" · 置信度 {conf:.2f}" if isinstance(conf, (int, float)) else ""
         t = esc(o["time"])
         meta_txt = f'{esc(o["app"])} · {esc(o["title"])} · {o["chars"]} 字{dur_txt}{split}{conf_txt}' if o.get("title") else f'{esc(o["app"])} · {o["chars"]} 字{dur_txt}{split}{conf_txt}'
-        flat = " ".join(o["text"].split())
+        # 摘要：去掉 markdown 标记行（标题/引言/分隔线）后取前 110 字
+        plain_lines = [ln for ln in o["text"].splitlines()
+                       if ln.strip() and not re.match(r"^\s{0,3}(#{1,6}\s|>\s?|---+\s*$)", ln)]
+        flat = " ".join(" ".join(plain_lines).split())
         preview = esc(flat[:110] + ("…" if len(flat) > 110 else ""))
         obs_cards += (
             f'<div class="card{" latest" if i == 0 and engine == "tesseract_local" else ""}">'
-            f'<div class="obshead"><span class="ot" data-full="{t}" onclick="toggleTime(this)">{esc(rel_time(o["time"]))}</span>'
+            f'<div class="obshead"><span class="oid">ID#{o["id"]}</span>'
+            f'<span class="ot" data-full="{t}" onclick="toggleTime(this)">{esc(rel_time(o["time"]))}</span>'
             f'{badge}<span class="conf">{meta_txt}</span></div>'
             f'<div class="preview" onclick="showObs(this)" title="点击查看完整识别内容">{preview}</div>'
             f'<pre class="fulltext" hidden>{esc(o["text"])}</pre></div>')
