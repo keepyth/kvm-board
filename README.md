@@ -16,6 +16,7 @@
   （「从 ID#x~#y 中提取（北京时间范围，约 N 分钟，M 条）」）；屏幕观察默认一行摘要，点击弹窗显示
   结构化全文（markdown 渲染）；观察有全局稳定 ID#；所有时间统一北京时间 `YYYY-MM-DD HH:MM:SS`；
   页面响应 no-store 禁缓存。
-- **llm-proxy**：systemd `llm-proxy`（监听 127.0.0.1:1235，转发到 LM Studio）。除剥离 `response_format: json_object` 和 markdown 围栏外，
-  会向 system prompt 注入「中文专有名词逐字原样照抄」的保真指令，防止小模型把「东山精密」改写成「东山若」之类的错误。
-  配合 memfab 配置 `[models.default] model = "mistralai/ministral-3-14b-reasoning"`（中文保真优于 3B），`timeout_seconds = 180`。
+- **llm-proxy**：systemd `llm-proxy`（监听 127.0.0.1:1235，转发到 LM Studio）。职责：剥离 `response_format: json_object`、剥 markdown 围栏、
+  注入中文实体保真指令、**输入预算裁剪**（删除无用的 bbox 坐标 + 压缩超长 text 字段到 8500 字符预算内），
+  防止 timeline 输入超出 LM Studio 8192 上下文（实测 3B/14B 的 timeline 失败率 82%/82% → 修复后 100% 成功）。
+  配合 memfab 配置 `recent_context_blocks = 12`。

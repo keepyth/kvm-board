@@ -425,7 +425,8 @@ def render_memory_page():
         src = esc(m["source"]) if m["source"] else "暂无可关联的原始观察"
         idbadge = f'<span class="ids">{esc(m["id_range"])}</span>' if m.get("id_range") else ""
         mem_cards += (
-            f'<div class="card memcard"><div class="memhead" onclick="toggleMem(this)">'
+            f'<div class="card memcard derived"><span class="tag tag-ai">AI 加工 · 非事实源</span>'
+            f'<div class="memhead" onclick="toggleMem(this)">'
             f'<span class="fname">📄 {esc(m["name"])}</span>{idbadge}'
             f'<span class="caret">▸</span></div>'
             f'<div class="membody" hidden>'
@@ -438,10 +439,12 @@ def render_memory_page():
         obs_cards = '<div class="card"><div class="sub">暂无观察记录</div></div>'
     for i, o in enumerate(obs):
         engine = o.get("engine", "")
+        lowq = ""
         if engine == "tesseract_local":
-            badge = '<span class="badge tess">⚙ 本地结构化 v3</span>'
+            badge = '<span class="badge tess">⚙ 本地结构化 v3 · 高精度</span>'
         elif engine == "nano_ocr_npu":
-            badge = '<span class="badge npu">⚡ NPU 快速</span>'
+            badge = '<span class="badge npu">⚡ NPU 快速 · 低精度</span>'
+            lowq = " lowq"
         else:
             badge = f'<span class="badge note">{esc(engine)}</span>'
         dur = o.get("duration_ms")
@@ -457,7 +460,8 @@ def render_memory_page():
         flat = " ".join(" ".join(plain_lines).split())
         preview = esc(flat[:110] + ("…" if len(flat) > 110 else ""))
         obs_cards += (
-            f'<div class="card{" latest" if i == 0 and engine == "tesseract_local" else ""}">'
+            f'<div class="card raw{lowq}{" latest" if i == 0 and engine == "tesseract_local" else ""}">'
+            f'<span class="tag tag-raw">原始 · 引擎直出</span>'
             f'<div class="obshead"><span class="oid">ID#{o["id"]}</span>'
             f'<span class="ot" data-full="{t}" onclick="toggleTime(this)">{esc(rel_time(o["time"]))}</span>'
             f'{badge}<span class="conf">{meta_txt}</span></div>'

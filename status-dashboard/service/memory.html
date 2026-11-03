@@ -87,15 +87,110 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
 .turn .role.system{background:#232a38;color:#8a93a5}
 .turn .role.assistant{background:#3b2f63;color:#c4b1ff}
 .turn pre.body{max-height:200px}
+/* ===== 数据分层：原始 vs 加工 ===== */
+.card.raw{border-left:4px solid #2f9b6d;background:linear-gradient(90deg,rgba(18,58,44,.30),#161a23 120px);position:relative}
+.card.raw.lowq{border-left-color:#a8811f;background:linear-gradient(90deg,rgba(58,44,14,.32),#161a23 120px)}
+.card.derived{border-left:4px dashed #6b52a8;background:linear-gradient(90deg,rgba(59,47,99,.30),#161a23 120px);position:relative}
+.tag{position:absolute;top:-9px;left:14px;font-size:10px;font-weight:700;padding:1px 8px;border-radius:5px;letter-spacing:.04em;background:#0b0e14}
+.tag-raw{color:#6ee7a8;border:1px solid #2f9b6d}
+.tag-raw.warn{color:#f0c24b;border-color:#a8811f}
+.tag-ai{color:#c4b1ff;border:1px solid #6b52a8}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#8a93a5;margin-top:10px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
+/* 数据流图 */
+.flow{margin:10px 0 0}
+.flow svg{width:100%;height:auto;display:block}
+.foot-note{font-size:11.5px;color:#8a93a5;margin-top:10px;line-height:1.7}
+.foot-note b{color:#e6e9ef}
 </style></head><body>
 <h1>🧠 记忆织网面板</h1>
 <div class="sub">刷新于 __TIME__ · 每 10 秒自动刷新（鼠标悬停在卡片上或抽屉打开时暂停） · memfab 服务 __SVC__ · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
 <div class="grid">__STATS_CARDS__</div>
 
-<h1 class="sec">长期记忆 <span class="badge model">🤖 模型产出物</span> <span class="badge note">reducer 环节：会话时间线 → 摘要记忆</span><button id="modelBtn" onclick="openDrawer()">🤖 模型状态</button></h1>
+<div class="card" style="padding:16px 18px">
+  <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+    <b style="font-size:14px">🔀 数据流与责任边界</b>
+    <span class="legend"><span><i style="background:#2f9b6d"></i>原始数据（引擎直出，未经模型）</span><span><i style="background:#a8811f"></i>原始·低精度（仅供参考）</span><span><i style="background:#6b52a8"></i>模型加工（非事实源）</span></span>
+  </div>
+  <div class="flow">
+  <svg viewBox="0 0 1160 606" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,'Segoe UI',sans-serif">
+    <defs>
+      <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#4a5568"/></marker>
+      <marker id="arG" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#2f9b6d"/></marker>
+      <marker id="arP" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#6b52a8"/></marker>
+    </defs>
+
+    <!-- 上游：屏幕与采集 -->
+    <rect x="60" y="36" width="200" height="58" rx="10" fill="#1c2333" stroke="#2a3550"/>
+    <text x="160" y="60" fill="#e6e9ef" font-size="13" font-weight="600" text-anchor="middle">被控电脑屏幕</text>
+    <text x="160" y="78" fill="#8a93a5" font-size="10.5" text-anchor="middle">1920×1080</text>
+
+    <line x1="262" y1="65" x2="326" y2="65" stroke="#4a5568" stroke-width="1.6" marker-end="url(#ar)"/>
+    <rect x="330" y="36" width="210" height="58" rx="10" fill="#1c2333" stroke="#2a3550"/>
+    <text x="435" y="60" fill="#e6e9ef" font-size="13" font-weight="600" text-anchor="middle">KVM 采集截图</text>
+    <text x="435" y="78" fill="#8a93a5" font-size="10.5" text-anchor="middle">MCP screenshot</text>
+
+    <!-- RAW 泳道 -->
+    <rect x="24" y="126" width="1112" height="204" rx="14" fill="#0c1a14" stroke="#1f5c44"/>
+    <text x="44" y="152" fill="#6ee7a8" font-size="12.5" font-weight="700">RAW · 原始数据层</text>
+    <text x="196" y="152" fill="#4d7a63" font-size="11">只追加写入 · 无任何模型参与 · 模型不可回写</text>
+
+    <path d="M435,94 V112 H255 V168" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#ar)"/>
+    <path d="M435,112 H600 V168" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#ar)"/>
+
+    <rect x="110" y="170" width="290" height="72" rx="10" fill="#231c10" stroke="#a8811f"/>
+    <text x="126" y="193" fill="#f0c24b" font-size="12.5" font-weight="700">⚡ [1] NPU 快速 OCR</text>
+    <text x="126" y="211" fill="#a89468" font-size="10.5">20 秒/次 · 均 1147 字 · 低精度</text>
+    <text x="126" y="228" fill="#d98a8a" font-size="10.5">⚠ 误识别源：东山精密 → 东山若</text>
+
+    <rect x="440" y="170" width="320" height="72" rx="10" fill="#0f2a20" stroke="#2f9b6d"/>
+    <text x="456" y="193" fill="#6ee7a8" font-size="12.5" font-weight="700">⚙ [2] tesseract 结构化 v3</text>
+    <text x="456" y="211" fill="#7ba995" font-size="10.5">60 秒/次 · 均 2202 字 · 高精度 · 分栏</text>
+    <text x="456" y="228" fill="#5f8d7a" font-size="10.5">同帧实测关键词召回 23/28</text>
+
+    <path d="M255,242 V254" fill="none" stroke="#a8811f" stroke-width="1.6" marker-end="url(#ar)"/>
+    <path d="M600,242 V254" fill="none" stroke="#2f9b6d" stroke-width="1.6" marker-end="url(#ar)"/>
+
+    <rect x="240" y="256" width="680" height="58" rx="10" fill="#0f2a20" stroke="#2f9b6d" stroke-width="1.4"/>
+    <text x="580" y="279" fill="#e6e9ef" font-size="12.5" font-weight="700" text-anchor="middle">[3] /var/lib/memfab/observation-buffer/*.json</text>
+    <text x="580" y="298" fill="#6ee7a8" font-size="10.5" text-anchor="middle">146 条 · 每条含全局 ID# + 引擎名 + 原文（页面上 ① 区就显示这里的内容）</text>
+
+    <!-- DERIVED 泳道 -->
+    <rect x="24" y="376" width="1112" height="200" rx="14" fill="#16112a" stroke="#5b4894"/>
+    <text x="44" y="402" fill="#c4b1ff" font-size="12.5" font-weight="700">DERIVED · 加工数据层</text>
+    <text x="212" y="402" fill="#7f72a8" font-size="11">大模型读取原始层后生成 · 可能概括、可能失真 · 不构成事实依据</text>
+
+    <path d="M580,314 V350 H245 V418" fill="none" stroke="#6b52a8" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arP)"/>
+    <text x="596" y="344" fill="#9b8ccc" font-size="10.5">只读引用 · 模型从不写回原始层</text>
+
+    <rect x="90" y="420" width="310" height="76" rx="10" fill="#241c3f" stroke="#6b52a8"/>
+    <text x="106" y="444" fill="#c4b1ff" font-size="12.5" font-weight="700">[4] timeline 时间线整理</text>
+    <text x="106" y="462" fill="#8d84b5" font-size="10.5">每 60 秒 · 输入 = 最近 40 个原始块</text>
+    <text x="106" y="479" fill="#8d84b5" font-size="10.5">产出：本轮发生了什么（JSON）</text>
+
+    <line x1="402" y1="458" x2="446" y2="458" stroke="#6b52a8" stroke-width="1.6" marker-end="url(#arP)"/>
+    <rect x="450" y="420" width="300" height="76" rx="10" fill="#241c3f" stroke="#6b52a8"/>
+    <text x="466" y="444" fill="#c4b1ff" font-size="12.5" font-weight="700">[5] reducer 长期记忆归约</text>
+    <text x="466" y="462" fill="#8d84b5" font-size="10.5">会话结束后汇总成 .md 记忆文件</text>
+    <text x="466" y="479" fill="#8d84b5" font-size="10.5">→ /var/lib/memfab/memory/</text>
+
+    <line x1="752" y1="458" x2="796" y2="458" stroke="#6b52a8" stroke-width="1.6" marker-end="url(#arP)"/>
+    <rect x="800" y="420" width="310" height="76" rx="10" fill="#10233a" stroke="#2f6ea8"/>
+    <text x="816" y="444" fill="#7cc4ff" font-size="12.5" font-weight="700">本页面 /memory</text>
+    <text x="816" y="462" fill="#7f9fc0" font-size="10.5">记忆区 ← 读加工层（紫色卡片）</text>
+    <text x="816" y="479" fill="#7f9fc0" font-size="10.5">OCR 区 ← 读原始层（绿色卡片）</text>
+  </svg>
+  </div>
+  <div class="foot-note">
+    <b>划界规则：</b>绿色/黄色卡片 = 引擎直出原文，<b>没有任何模型参与</b>，可作事实依据（黄色为 NPU 低精度，仅参考）；紫色卡片 = 大模型归纳产出，可读但不可当原文引用。<br>
+    <b>关于「东山若」：</b>该错字出现在 <b>[1] NPU OCR</b> 写入原始层的记录里（<b>ID#63/64/81/82/84/88</b>，engine=nano_ocr_npu），而同期 tesseract（ID#65、#85）识别为「东山精密」。模型 [4][5] 只把原始层里的错字当上下文照抄，<b>既不主动改写、也不会纠正</b>——错字只能从上游 OCR 进入。所以要紧的是上游 OCR 选型，不是模型。
+  </div>
+</div>
+
+<h1 class="sec" style="border-left:4px solid #6b52a8;padding-left:10px">长期记忆 · 模型加工 <span class="badge model">🤖 reducer 产出 · 非事实源</span> <span class="badge note">会话时间线 → 摘要记忆 · 点击文件名展开</span><button id="modelBtn" onclick="openDrawer()">🤖 模型状态</button></h1>
 __MEM_CARDS__
 
-<h1 class="sec">屏幕全文识别（OCR） <span class="badge tess">⚙ tesseract 结构化 v3</span> <span class="badge npu">⚡ NPU 快速</span> <span class="badge note">点击摘要看完整结构化全文 · 悬停暂停刷新</span></h1>
+<h1 class="sec" style="border-left:4px solid #2f9b6d;padding-left:10px">屏幕识别原文 · 原始数据 <span class="badge tess">⚙ tesseract v3 · 高精度</span> <span class="badge npu">⚡ NPU · 低精度</span> <span class="badge note">引擎直出，无模型参与 · 点击摘要看全文</span></h1>
 <div class="obslist">__OBS_CARDS__</div>
 
 <footer>NanoKVM Memory Fabric · 数据源 /var/lib/memfab · 仅限局域网访问</footer>
@@ -110,7 +205,7 @@ __MEM_CARDS__
 <div id="drawer">
   <span class="close" onclick="closeDrawer()">✕</span>
   <h3>🤖 模型工作状态</h3>
-  <div class="sub" style="margin-bottom:12px">大模型只负责"理解与总结"，OCR 由本地引擎完成（tesseract 全文 v2 + NPU 快速）</div>
+  <div class="sub" style="margin-bottom:12px">模型只参与"理解与总结"（图中 [4][5]），<b>从不接触原始 OCR 记录</b>；OCR 由本地引擎完成（图中 [1][2]）</div>
   <div id="drawerBody"><div class="sub">加载中…</div></div>
 </div>
 <script>
