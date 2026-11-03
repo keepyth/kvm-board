@@ -354,11 +354,15 @@ def render_memory_page():
         conf = o.get("confidence")
         conf_txt = f" · 置信度 {conf:.2f}" if isinstance(conf, (int, float)) else ""
         t = esc(o["time"])
+        meta_txt = f'{esc(o["app"])} · {esc(o["title"])} · {o["chars"]} 字{dur_txt}{split}{conf_txt}' if o.get("title") else f'{esc(o["app"])} · {o["chars"]} 字{dur_txt}{split}{conf_txt}'
+        flat = " ".join(o["text"].split())
+        preview = esc(flat[:110] + ("…" if len(flat) > 110 else ""))
         obs_cards += (
             f'<div class="card{" latest" if i == 0 and engine == "tesseract_local" else ""}">'
             f'<div class="obshead"><span class="ot" data-full="{t}" onclick="toggleTime(this)">{esc(rel_time(o["time"]))}</span>'
-            f'{badge}<span class="conf">{esc(o["app"])} · {o["chars"]} 字{dur_txt}{split}{conf_txt}</span></div>'
-            f'<pre class="body full">{esc(o["text"])}</pre></div>')
+            f'{badge}<span class="conf">{meta_txt}</span></div>'
+            f'<div class="preview" onclick="showObs(this)" title="点击查看完整识别内容">{preview}</div>'
+            f'<pre class="fulltext" hidden>{esc(o["text"])}</pre></div>')
 
     return (MEM_PAGE
             .replace("__STATS_CARDS__", stat_cards)
@@ -423,6 +427,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = html_out.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
         except Exception as e:

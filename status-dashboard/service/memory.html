@@ -28,7 +28,16 @@ td{padding:6px 8px;border-bottom:1px solid #232a38;vertical-align:top}
 .obshead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .ot{cursor:pointer;border-bottom:1px dashed #8a93a5;color:#aeb6c4;font-size:12px;white-space:nowrap}
 .card.latest{border-color:#1f5c8a;box-shadow:0 0 0 1px #1f5c8a}
-pre.body.full{max-height:340px;font-size:12.5px}
+.preview{cursor:pointer;font-size:12.5px;line-height:1.6;color:#c6cdd9;background:#0f131b;border:1px solid #232a38;border-radius:8px;padding:10px}
+.preview:hover{border-color:#3b82d0;color:#e6e9ef}
+.fulltext{display:none}
+#obsMask{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:110;display:none}
+#obsModal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:860px;max-width:94vw;max-height:88vh;
+background:#10141d;border:1px solid #2a3550;border-radius:14px;z-index:120;display:none;flex-direction:column;padding:20px;box-sizing:border-box;box-shadow:0 10px 40px rgba(0,0,0,.6)}
+#obsModal h3{margin:0 40px 6px 0;font-size:15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#obsModal .close{position:absolute;top:12px;right:16px;color:#8a93a5;cursor:pointer;font-size:22px}
+#obsModal pre{flex:1;overflow:auto;margin:10px 0 0;white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.6;
+color:#c6cdd9;background:#0f131b;border:1px solid #232a38;border-radius:8px;padding:12px}
 footer{margin-top:20px;color:#5b6473;font-size:11px}
 .ok{color:#4ade80}.bad{color:#f87171}
 /* 模型状态按钮：悬浮于"长期记忆"标题行右侧 */
@@ -70,6 +79,12 @@ __MEM_CARDS__
 <footer>NanoKVM Memory Fabric · 数据源 /var/lib/memfab · 仅限局域网访问</footer>
 
 <div id="drawerMask" onclick="closeDrawer()"></div>
+<div id="obsMask" onclick="closeObs()"></div>
+<div id="obsModal">
+  <span class="close" onclick="closeObs()">✕</span>
+  <h3 id="obsModalTitle"></h3>
+  <pre id="obsModalBody"></pre>
+</div>
 <div id="drawer">
   <span class="close" onclick="closeDrawer()">✕</span>
   <h3>🤖 模型工作状态</h3>
@@ -133,10 +148,26 @@ function closeDrawer(){
   document.getElementById("drawerMask").style.display="none";
   document.getElementById("drawer").classList.remove("open");
 }
-// 整页自动刷新：抽屉打开或鼠标悬停在识别卡片上时暂停
+// OCR 全文弹窗：点击摘要打开，显示完整识别内容
+function showObs(el){
+  const card=el.closest(".card");
+  const head=card.querySelector(".obshead");
+  const full=card.querySelector(".fulltext").textContent;
+  document.getElementById("obsModalTitle").innerHTML=head.innerHTML;
+  document.getElementById("obsModalBody").textContent=full;
+  document.getElementById("obsMask").style.display="block";
+  document.getElementById("obsModal").style.display="flex";
+}
+function closeObs(){
+  document.getElementById("obsMask").style.display="none";
+  document.getElementById("obsModal").style.display="none";
+}
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeObs(); });
+// 整页自动刷新：抽屉或弹窗打开、鼠标悬停在识别卡片上时暂停
 function drawerOpen(){
   return document.getElementById("drawer").classList.contains("open")
-      || document.getElementById("drawerMask").style.display==="block";
+      || document.getElementById("drawerMask").style.display==="block"
+      || document.getElementById("obsModal").style.display==="flex";
 }
 function paused(){
   return drawerOpen() || !!document.querySelector(".obslist:hover");
