@@ -48,7 +48,8 @@ td{padding:6px 8px;border-bottom:1px solid #232a38;vertical-align:top}
 .md h4{font-size:13.5px;color:#a78bfa;border-bottom:1px solid #232a38;padding-bottom:4px}
 .md h5{font-size:12.5px;color:#8a93a5;font-weight:600}
 .md h6,.md h7{font-size:12px;color:#8a93a5;font-weight:500}
-.md p{margin:4px 0;white-space:pre-wrap;word-break:break-word}
+.md p{margin:0 0 9px;white-space:pre-wrap;word-break:break-word}
+.md p:last-child{margin-bottom:0}
 .md ul{margin:4px 0;padding-left:20px}
 .md li{margin:2px 0}
 .md blockquote{margin:6px 0;padding:2px 10px;border-left:3px solid #2a3550;color:#8a93a5}
@@ -100,8 +101,10 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
 /* 数据流图 */
 .flow{margin:10px 0 0}
 .flow svg{width:100%;height:auto;display:block}
-.foot-note{font-size:11.5px;color:#8a93a5;margin-top:10px;line-height:1.7}
+.foot-note{font-size:11.5px;color:#8a93a5;margin-top:14px;line-height:1.75}
 .foot-note b{color:#e6e9ef}
+.foot-note p{margin:0 0 12px}
+.foot-note p:last-child{margin-bottom:0}
 </style></head><body>
 <h1>🧠 记忆织网面板</h1>
 <div class="sub">刷新于 __TIME__ · 每 10 秒自动刷新（鼠标悬停在卡片上或抽屉打开时暂停） · memfab 服务 __SVC__ · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
@@ -182,8 +185,9 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
   </svg>
   </div>
   <div class="foot-note">
-    <b>划界规则：</b>绿色/黄色卡片 = 引擎直出原文，<b>没有任何模型参与</b>，可作事实依据（黄色为 NPU 低精度，仅参考）；紫色卡片 = 大模型归纳产出，可读但不可当原文引用。<br>
-    <b>关于「东山若」：</b>该错字出现在 <b>[1] NPU OCR</b> 写入原始层的记录里（<b>ID#63/64/81/82/84/88</b>，engine=nano_ocr_npu），而同期 tesseract（ID#65、#85）识别为「东山精密」。模型 [4][5] 只把原始层里的错字当上下文照抄，<b>既不主动改写、也不会纠正</b>——错字只能从上游 OCR 进入。所以要紧的是上游 OCR 选型，不是模型。
+    <p><b>划界规则：</b>绿色/黄色卡片 = 引擎直出原文，<b>没有任何模型参与</b>，可作事实依据（黄色为 NPU 低精度，仅参考）；紫色卡片 = 大模型归纳产出，可读但不可当原文引用。</p>
+    <p><b>关于「东山若」：</b>该错字出现在 <b>[1] NPU OCR</b> 写入原始层的记录里（<b>ID#63/64/81/82/84/88</b>，engine=nano_ocr_npu），而同期 tesseract（ID#65、#85）识别为「东山精密」。</p>
+    <p>模型 [4][5] 只把原始层里的错字当上下文照抄，<b>既不主动改写、也不会纠正</b>——错字只能从上游 OCR 进入。所以要紧的是上游 OCR 选型，不是模型。</p>
   </div>
 </div>
 
