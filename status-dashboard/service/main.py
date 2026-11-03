@@ -443,7 +443,7 @@ def render_memory_page():
         if engine == "tesseract_local":
             badge = '<span class="badge tess">⚙ 本地结构化 v3 · 高精度</span>'
         elif engine == "nano_ocr_npu":
-            badge = '<span class="badge npu">⚡ NPU 快速 · 低精度</span>'
+            badge = '<span class="badge npu" style="opacity:.6">⚡ NPU · 低精度（已停用）</span>'
             lowq = " lowq"
         else:
             badge = f'<span class="badge note">{esc(engine)}</span>'

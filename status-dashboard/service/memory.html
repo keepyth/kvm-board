@@ -141,10 +141,10 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
     <path d="M435,94 V112 H255 V168" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#ar)"/>
     <path d="M435,112 H600 V168" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#ar)"/>
 
-    <rect x="110" y="170" width="290" height="72" rx="10" fill="#231c10" stroke="#a8811f"/>
-    <text x="126" y="193" fill="#f0c24b" font-size="12.5" font-weight="700">⚡ [1] NPU 快速 OCR</text>
-    <text x="126" y="211" fill="#a89468" font-size="10.5">20 秒/次 · 均 1147 字 · 低精度</text>
-    <text x="126" y="228" fill="#d98a8a" font-size="10.5">⚠ 误识别源：东山精密 → 东山若</text>
+    <rect x="110" y="170" width="290" height="72" rx="10" fill="#1d1a12" stroke="#6b5a2a" stroke-dasharray="6 4" opacity="0.75"/>
+    <text x="126" y="193" fill="#a89468" font-size="12.5" font-weight="700">⚡ [1] NPU 快速 OCR（已停用）</text>
+    <text x="126" y="211" fill="#8a7d5c" font-size="10.5">2026-11-03 10:56 起停止，仅留历史记录</text>
+    <text x="126" y="228" fill="#a06b6b" font-size="10.5">⚠ 误识别源：东山精密 → 东山若</text>
 
     <rect x="440" y="170" width="320" height="72" rx="10" fill="#0f2a20" stroke="#2f9b6d"/>
     <text x="456" y="193" fill="#6ee7a8" font-size="12.5" font-weight="700">⚙ [2] tesseract 结构化 v3</text>
@@ -186,6 +186,7 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
   </div>
   <div class="foot-note">
     <p><b>划界规则：</b>绿色/黄色卡片 = 引擎直出原文，<b>没有任何模型参与</b>，可作事实依据（黄色为 NPU 低精度，仅参考）；紫色卡片 = 大模型归纳产出，可读但不可当原文引用。</p>
+    <p><b>引擎取舍：</b>NPU OCR（[1]）已于 2026-11-03 10:56 <b>停止并禁用开机自启</b>，屏幕识别此后只由 tesseract v3（[2]）承担。历史 NPU 记录仍保留在原始层，标为「已停用」以便追溯。</p>
     <p><b>关于「东山若」：</b>该错字出现在 <b>[1] NPU OCR</b> 写入原始层的记录里（<b>ID#63/64/81/82/84/88</b>，engine=nano_ocr_npu），而同期 tesseract（ID#65、#85）识别为「东山精密」。</p>
     <p>模型 [4][5] 只把原始层里的错字当上下文照抄，<b>既不主动改写、也不会纠正</b>——错字只能从上游 OCR 进入。所以要紧的是上游 OCR 选型，不是模型。</p>
   </div>
@@ -194,7 +195,7 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
 <h1 class="sec" style="border-left:4px solid #6b52a8;padding-left:10px">长期记忆 · 模型加工 <span class="badge model">🤖 reducer 产出 · 非事实源</span> <span class="badge note">会话时间线 → 摘要记忆 · 点击文件名展开</span><button id="modelBtn" onclick="openDrawer()">🤖 模型状态</button></h1>
 __MEM_CARDS__
 
-<h1 class="sec" style="border-left:4px solid #2f9b6d;padding-left:10px">屏幕识别原文 · 原始数据 <span class="badge tess">⚙ tesseract v3 · 高精度</span> <span class="badge npu">⚡ NPU · 低精度</span> <span class="badge note">引擎直出，无模型参与 · 点击摘要看全文</span></h1>
+<h1 class="sec" style="border-left:4px solid #2f9b6d;padding-left:10px">屏幕识别原文 · 原始数据 <span class="badge tess">⚙ tesseract v3 · 高精度</span> <span class="badge npu" style="opacity:.55">⚡ NPU · 已停用（仅历史）</span> <span class="badge note">引擎直出，无模型参与 · 点击摘要看全文</span></h1>
 <div class="obslist">__OBS_CARDS__</div>
 
 <footer>NanoKVM Memory Fabric · 数据源 /var/lib/memfab · 仅限局域网访问</footer>
