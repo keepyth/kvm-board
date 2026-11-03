@@ -400,7 +400,8 @@ def rel_time(ts):
         return ts
 
 
-def render_memory_page():
+def render_memory_fragments():
+    """只渲染页面的可变片段，供前端 AJAX 局部替换（避免整页刷新）。"""
     st = memfab_stats()
     mems = memfab_memories()
     obs = memfab_observations()
@@ -468,12 +469,21 @@ def render_memory_page():
             f'<div class="preview" onclick="showObs(this)" title="点击查看完整识别内容">{preview}</div>'
             f'<pre class="fulltext" hidden>{esc(o["text"])}</pre></div>')
 
+    return {"time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "svc": svc,
+            "stats": stat_cards,
+            "mem": mem_cards,
+            "obs": obs_cards}
+
+
+def render_memory_page():
+    frag = render_memory_fragments()
     return (MEM_PAGE
-            .replace("__STATS_CARDS__", stat_cards)
-            .replace("__SVC__", svc)
-            .replace("__MEM_CARDS__", mem_cards)
-            .replace("__OBS_CARDS__", obs_cards)
-            .replace("__TIME__", time.strftime("%Y-%m-%d %H:%M:%S")))
+            .replace("__STATS_CARDS__", frag["stats"])
+            .replace("__SVC__", frag["svc"])
+            .replace("__MEM_CARDS__", frag["mem"])
+            .replace("__OBS_CARDS__", frag["obs"])
+            .replace("__TIME__", frag["time"]))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -494,6 +504,10 @@ class Handler(BaseHTTPRequestHandler):
                                    "memories": memfab_memories(),
                                    "observations": memfab_observations()},
                                   ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+            elif path == "/api/memory/fragment":
+                body = json.dumps(render_memory_fragments(), ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
             elif path == "/memory":

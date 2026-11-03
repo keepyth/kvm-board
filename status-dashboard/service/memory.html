@@ -105,16 +105,24 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
 .foot-note b{color:#e6e9ef}
 .foot-note p{margin:0 0 12px}
 .foot-note p:last-child{margin-bottom:0}
+/* 数据流卡片：默认收起 */
+.flowcard{padding:14px 18px}
+.flowcard summary{cursor:pointer;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;list-style:none;user-select:none}
+.flowcard summary::-webkit-details-marker{display:none}
+.flowcard summary::before{content:"▸";color:#5b6473;transition:transform .18s;display:inline-block;font-size:12px}
+.flowcard[open] summary::before{transform:rotate(90deg)}
+.flowcard summary .hint{font-size:11.5px;color:#8a93a5}
+.flowcard[open] summary{margin-bottom:4px;border-bottom:1px solid #232a38;padding-bottom:10px}
+.flowbody{margin-top:10px}
 </style></head><body>
 <h1>🧠 记忆织网面板</h1>
-<div class="sub">刷新于 __TIME__ · 每 10 秒自动刷新（鼠标悬停在卡片上或抽屉打开时暂停） · memfab 服务 __SVC__ · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
-<div class="grid">__STATS_CARDS__</div>
+<div class="sub">刷新于 <span id="updTime">__TIME__</span> · 每 10 秒自动更新（局部刷新，鼠标悬停在卡片上或抽屉/弹窗打开时暂停） · memfab 服务 <span id="svcState">__SVC__</span> · <a href="/">← 返回状态面板</a> · <a href="/api/memory">JSON API</a></div>
+<div class="grid" id="statsWrap">__STATS_CARDS__</div>
 
-<div class="card" style="padding:16px 18px">
-  <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-    <b style="font-size:14px">🔀 数据流与责任边界</b>
-    <span class="legend"><span><i style="background:#2f9b6d"></i>原始数据（引擎直出，未经模型）</span><span><i style="background:#a8811f"></i>原始·低精度（仅供参考）</span><span><i style="background:#6b52a8"></i>模型加工（非事实源）</span></span>
-  </div>
+<details class="card flowcard" id="flowCard">
+  <summary><b style="font-size:14px">🔀 数据流与责任边界</b><span class="hint">绿色 = 原始数据（引擎直出）· 紫色 = 模型加工，点击展开查看完整流程图</span></summary>
+  <div class="flowbody">
+  <div class="legend" style="margin:12px 0 0"><span><i style="background:#2f9b6d"></i>原始数据（引擎直出，未经模型）</span><span><i style="background:#a8811f"></i>原始·低精度（仅供参考）</span><span><i style="background:#6b52a8"></i>模型加工（非事实源）</span></div>
   <div class="flow">
   <svg viewBox="0 0 1160 606" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,'Segoe UI',sans-serif">
     <defs>
@@ -190,13 +198,14 @@ z-index:100;transition:right .25s ease;overflow-y:auto;padding:20px;box-sizing:b
     <p><b>关于「东山若」：</b>该错字出现在 <b>[1] NPU OCR</b> 写入原始层的记录里（<b>ID#63/64/81/82/84/88</b>，engine=nano_ocr_npu），而同期 tesseract（ID#65、#85）识别为「东山精密」。</p>
     <p>模型 [4][5] 只把原始层里的错字当上下文照抄，<b>既不主动改写、也不会纠正</b>——错字只能从上游 OCR 进入。所以要紧的是上游 OCR 选型，不是模型。</p>
   </div>
-</div>
+  </div>
+</details>
 
 <h1 class="sec" style="border-left:4px solid #6b52a8;padding-left:10px">长期记忆 · 模型加工 <span class="badge model">🤖 reducer 产出 · 非事实源</span> <span class="badge note">会话时间线 → 摘要记忆 · 点击文件名展开</span><button id="modelBtn" onclick="openDrawer()">🤖 模型状态</button></h1>
-__MEM_CARDS__
+<div id="memWrap">__MEM_CARDS__</div>
 
 <h1 class="sec" style="border-left:4px solid #2f9b6d;padding-left:10px">屏幕识别原文 · 原始数据 <span class="badge tess">⚙ tesseract v3 · 高精度</span> <span class="badge npu" style="opacity:.55">⚡ NPU · 已停用（仅历史）</span> <span class="badge note">引擎直出，无模型参与 · 点击摘要看全文</span></h1>
-<div class="obslist">__OBS_CARDS__</div>
+<div class="obslist" id="obsWrap">__OBS_CARDS__</div>
 
 <footer>NanoKVM Memory Fabric · 数据源 /var/lib/memfab · 仅限局域网访问</footer>
 
@@ -339,6 +348,33 @@ function drawerOpen(){
 function paused(){
   return drawerOpen() || !!document.querySelector(".obslist:hover");
 }
-setInterval(()=>{ if(!paused()) location.reload(); },10000);
+// AJAX 局部刷新：只替换数据区，不整页重载（保留滚动位置、展开状态）
+async function ajaxRefresh(){
+  if(paused()) return;
+  try{
+    const r=await fetch("/api/memory/fragment",{cache:"no-store"});
+    if(!r.ok) return;
+    const d=await r.json();
+    const openMems=[...document.querySelectorAll("#memWrap .memcard.open .fname")]
+      .map(e=>e.textContent.replace(/^📄\s*/,"").trim());
+    const setHtml=(id,html)=>{const el=document.getElementById(id); if(el&&html!=null) el.innerHTML=html;};
+    setHtml("statsWrap",d.stats);
+    setHtml("memWrap",d.mem);
+    setHtml("obsWrap",d.obs);
+    const t=document.getElementById("updTime"); if(t) t.textContent=d.time;
+    const s=document.getElementById("svcState"); if(s) s.innerHTML=d.svc;
+    openMems.forEach(n=>{
+      for(const card of document.querySelectorAll("#memWrap .memcard")){
+        const f=card.querySelector(".fname");
+        if(f && f.textContent.replace(/^📄\s*/,"").trim()===n){
+          const b=card.querySelector(".membody"); if(b) b.hidden=false;
+          card.classList.add("open"); break;
+        }
+      }
+    });
+  }catch(e){ /* 网络抖动忽略，下一轮再试 */ }
+}
+setInterval(ajaxRefresh,10000);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) ajaxRefresh(); });
 </script>
 </body></html>
