@@ -34,6 +34,31 @@ FIDELITY = (
 TEXT_RE = re.compile(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"')
 BBOX_RE = re.compile(r',"bbox":\s*\[[^\]]*\]')   # 坐标对模型无用，整段删除
 
+EMPTY_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": True}
+
+
+def fix_tool_schemas(tools):
+    """LM Studio 严格校验 tool schema：缺失/非 object 的 parameters 一律补空对象。
+    返回修复数量。"""
+    n = 0
+    for t in tools if isinstance(tools, list) else []:
+        if not isinstance(t, dict):
+            continue
+        f = t.get("function")
+        if not isinstance(f, dict):
+            continue
+        if not isinstance(f.get("parameters"), dict):
+            f["parameters"] = dict(EMPTY_SCHEMA)
+            n += 1
+        else:
+            p = f["parameters"]
+            if not isinstance(p.get("properties"), dict):
+                p["properties"] = {}
+            req = p.get("required")
+            if not isinstance(req, list):
+                p["required"] = []
+    return n
+
 
 def _strip_bbox(s):
     return BBOX_RE.sub("", s)
@@ -69,9 +94,47 @@ def _set_msg_text(m, text):
     if isinstance(c, str):
         m["content"] = text
     elif isinstance(c, list):
-        texts = [p for p in c if isinstance(p, dict) and p.get("type") == "text"]
-        if texts:
-            texts[0]["text"] = text
+        for p in c:
+            if isinstance(p, dict) and p.get("type") == "text":
+                p["text"] = text
+                return
+        m["content"] = text
+
+
+def merge_messages(msgs):
+    """mistral 系 chat template 要求角色严格交替（system 最多一条开头，user/assistant 轮流）。
+    把相邻同角色的纯文本消息合并；带 tool_calls / tool_call_id 的消息保持原位不动。"""
+    out = []
+    for m in msgs:
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        role = m.get("role")
+        if (out and isinstance(out[-1], dict) and out[-1].get("role") == role
+                and role in ("user", "assistant", "system")
+                and not m.get("tool_calls") and not out[-1].get("tool_calls")
+                and not m.get("tool_call_id")):
+            prev = out[-1]
+            merged = dict(prev)
+            _set_msg_text(merged, _msg_text(prev).rstrip() + "\n\n" + _msg_text(m).lstrip())
+            out[-1] = merged
+        else:
+            out.append(m)
+    # system 只能出现在最前：把后面的 system 挪去和首条合并
+    first_sys = next((i for i, m in enumerate(out)
+                      if isinstance(m, dict) and m.get("role") == "system"), None)
+    if first_sys is not None:
+        head = out[first_sys]
+        rest = []
+        for m in out[first_sys + 1:]:
+            if isinstance(m, dict) and m.get("role") == "system":
+                merged = dict(head)
+                _set_msg_text(merged, _msg_text(head).rstrip() + "\n\n" + _msg_text(m).lstrip())
+                head = merged
+            else:
+                rest.append(m)
+        out = out[:first_sys] + [head] + rest
+    return out
 
 
 def fit_budget(msgs):
@@ -112,25 +175,38 @@ class Handler(BaseHTTPRequestHandler):
                 rf = data.get("response_format")
                 if rf and rf.get("type") == "json_object":
                     data.pop("response_format", None)
-                msgs = data.get("messages")
-                if isinstance(msgs, list) and msgs:
-                    for m in msgs:
-                        if isinstance(m, dict) and m.get("role") in ("system", "developer"):
-                            c = m.get("content")
-                            if isinstance(c, str):
-                                m["content"] = c + FIDELITY
-                                break
-                            if isinstance(c, list):
-                                for part in c:
-                                    if isinstance(part, dict) and part.get("type") == "text":
-                                        part["text"] += FIDELITY
-                                        break
-                                break
-                    else:
-                        msgs.insert(0, {"role": "system", "content": FIDELITY})
-                    raw_len, sent_len, limit = fit_budget(msgs)
-                    info.update(inject=FIDELITY.splitlines()[1][:6] in json.dumps(data, ensure_ascii=False),
-                                msgs=len(msgs), raw=raw_len, sent=sent_len, limit=limit)
+                tools = data.get("tools")
+                agent_mode = isinstance(tools, list) and tools
+                if agent_mode:
+                    # agent 型请求（如 PicoClaw）：修 tool schema + 合并消息满足模板角色交替
+                    info["tools_fixed"] = fix_tool_schemas(tools)
+                    if isinstance(data.get("messages"), list):
+                        data["messages"] = merge_messages(data["messages"])
+                    try:
+                        with open("/tmp/llm_last_req.json", "w") as f:
+                            f.write(json.dumps(data, ensure_ascii=False, indent=1))
+                    except Exception:
+                        pass
+                else:
+                    msgs = data.get("messages")
+                    if isinstance(msgs, list) and msgs:
+                        for m in msgs:
+                            if isinstance(m, dict) and m.get("role") in ("system", "developer"):
+                                c = m.get("content")
+                                if isinstance(c, str):
+                                    m["content"] = c + FIDELITY
+                                    break
+                                if isinstance(c, list):
+                                    for part in c:
+                                        if isinstance(part, dict) and part.get("type") == "text":
+                                            part["text"] += FIDELITY
+                                            break
+                                    break
+                        else:
+                            msgs.insert(0, {"role": "system", "content": FIDELITY})
+                        raw_len, sent_len, limit = fit_budget(msgs)
+                        info.update(inject=FIDELITY.splitlines()[1][:6] in json.dumps(data, ensure_ascii=False),
+                                    msgs=len(msgs), raw=raw_len, sent=sent_len, limit=limit)
                 body = json.dumps(data).encode()
             except Exception as e:
                 print("%s preprocess_error=%s" % (time.strftime("%H:%M:%S"), e), flush=True)
@@ -154,6 +230,13 @@ class Handler(BaseHTTPRequestHandler):
                 note = up["error"][:120]
                 payload = json.dumps({"error": {"message": up["error"], "type": "upstream_error"}}).encode()
                 code = 400 if code == 200 else code
+            elif isinstance(up.get("error"), (dict, list)):
+                note = json.dumps(up["error"], ensure_ascii=False)[:200]
+                try:
+                    with open("/tmp/llm_last_err.json", "w") as f:
+                        f.write(json.dumps(up, ensure_ascii=False, indent=1))
+                except Exception:
+                    pass
             else:
                 content = up["choices"][0]["message"]["content"]
                 stripped = content.strip()
@@ -169,9 +252,9 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
-        print("%s msgs=%d chars %d->%d limit=%s code=%s %s" % (
+        print("%s msgs=%d chars %d->%d limit=%s tools_fixed=%s code=%s %s" % (
             time.strftime("%H:%M:%S"), info["msgs"], info["raw"], info["sent"],
-            info["limit"], code, note), flush=True)
+            info["limit"], info.get("tools_fixed", "-"), code, note), flush=True)
 
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
