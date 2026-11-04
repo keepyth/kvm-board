@@ -29,6 +29,7 @@ PAGE = open(os.path.join(BASE, "page.html"), encoding="utf-8").read()
 MEM_PAGE = open(os.path.join(BASE, "memory.html"), encoding="utf-8").read()
 SHOTS_PAGE = open(os.path.join(BASE, "shots.html"), encoding="utf-8").read()
 FILES_PAGE = open(os.path.join(BASE, "files.html"), encoding="utf-8").read()
+PICO_PAGE = open(os.path.join(BASE, "picoclaw.html"), encoding="utf-8").read()
 FILES_PASS = os.environ.get("FILES_PASS", "/etc/kvm/files.pass")   # 格式: 用户名:密码（一行）
 
 
@@ -829,6 +830,234 @@ def render_files_page(path, show_hidden=False):
             .replace("__TIME__", time.strftime("%Y-%m-%d %H:%M:%S")))
 
 
+# ---------- PicoClaw 可视化（/picoclaw） ----------
+
+PICO_BIN = "/opt/picoclaw/picoclaw"
+PICO_CONF = "/root/.picoclaw/config.json"
+PICO_LOG = "/root/.picoclaw/logs/gateway.log"
+PICO_WS = "/opt/picoclaw/workspace"
+PICO_SVC = "picoclaw-gateway"
+PICO_UNIT = "/etc/systemd/system/picoclaw-gateway.service"
+PICO_PORT = 18800
+
+
+def pico_health():
+    """直接读 127.0.0.1:18800/health（用 socket 省掉 urllib.request 的依赖）。"""
+    try:
+        s = socket.create_connection(("127.0.0.1", PICO_PORT), timeout=1.5)
+        s.sendall(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+        buf = b""
+        while len(buf) < 4096:
+            ch = s.recv(1024)
+            if not ch:
+                break
+            buf += ch
+        s.close()
+        body = buf.split(b"\r\n\r\n", 1)[-1]
+        return json.loads(body.decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
+def pico_svc():
+    info = {"active": "unknown"}
+    try:
+        r = subprocess.run(["systemctl", "is-active", PICO_SVC], capture_output=True,
+                           text=True, timeout=5)
+        info["active"] = (r.stdout or r.stderr).strip() or "unknown"
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(["systemctl", "show", PICO_SVC, "--no-pager", "-p", "MainPID",
+                            "-p", "MemoryCurrent", "-p", "NRestarts", "-p", "ActiveEnterTimestamp"],
+                           capture_output=True, text=True, timeout=5)
+        for line in r.stdout.splitlines():
+            k, _, v = line.partition("=")
+            info[k] = v.strip()
+    except Exception:
+        pass
+    return info
+
+
+def pico_config():
+    try:
+        cfg = json.load(open(PICO_CONF, encoding="utf-8"))
+    except Exception:
+        return None
+    # 脱敏：api_keys 与 MCP Authorization 头
+    for m in cfg.get("model_list", []):
+        if m.get("api_keys"):
+            m["api_keys"] = ["***"]
+    for sv in (cfg.get("tools", {}).get("mcp", {}) or {}).get("servers", {}).values():
+        hd = sv.get("headers") or {}
+        for hk in list(hd):
+            if hk.lower() == "authorization":
+                hd[hk] = "Bearer ***"
+    return cfg
+
+
+def pico_log(n=120):
+    try:
+        with open(PICO_LOG, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()[-n:]
+    except Exception:
+        return []
+    out = []
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            d = json.loads(ln)
+        except Exception:
+            out.append({"t": "", "lvl": "raw", "comp": "", "msg": ln[:400]})
+            continue
+        out.append({"t": (d.get("time") or "")[11:19],
+                    "lvl": (d.get("level") or "info").lower(),
+                    "comp": d.get("component") or "",
+                    "msg": d.get("message") or ""})
+    return out
+
+
+def pico_sessions(limit=6, max_msgs=60):
+    d = os.path.join(PICO_WS, "sessions")
+    res = []
+    try:
+        names = [f for f in os.listdir(d) if f.endswith(".jsonl")]
+        names.sort(key=lambda f: os.path.getmtime(os.path.join(d, f)), reverse=True)
+    except Exception:
+        return res
+    for name in names[:limit]:
+        fp = os.path.join(d, name)
+        msgs, total = [], 0
+        try:
+            lines = open(fp, encoding="utf-8", errors="replace").read().splitlines()
+            total = len(lines)
+            for ln in lines[-max_msgs:]:
+                try:
+                    msgs.append(json.loads(ln))
+                except Exception:
+                    pass
+        except Exception:
+            continue
+        res.append({"name": name, "mtime": os.path.getmtime(fp), "total": total, "msgs": msgs})
+    return res
+
+
+def _pico_unit_summary():
+    rows = []
+    try:
+        for ln in open(PICO_UNIT, encoding="utf-8", errors="replace").read().splitlines():
+            s = ln.strip()
+            for key in ("ExecStart=", "Restart=", "MemoryMax=", "MemoryHigh=", "Environment=", "User="):
+                if s.startswith(key):
+                    rows.append((key.rstrip("="), s[len(key):]))
+    except Exception:
+        pass
+    return rows
+
+
+def _pico_bin_info():
+    try:
+        st = os.stat(PICO_BIN)
+        return fmt_size(st.st_size), datetime.fromtimestamp(st.st_mtime, BJ).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return "?", "?"
+
+
+def render_pico_sessions():
+    out = []
+    for si, s in enumerate(pico_sessions()):
+        mt = datetime.fromtimestamp(s["mtime"], BJ).strftime("%m-%d %H:%M")
+        msgs = []
+        for m in s["msgs"]:
+            role = m.get("role")
+            content = (m.get("content") or "").strip()
+            ts = fmt_bj_text(m.get("created_at") or "")
+            if role == "user":
+                msgs.append(f'<div class="msg u"><div class="who">你 · {html.escape(ts)}</div>'
+                            f'<div class="bub">{html.escape(content)}</div></div>')
+            elif role == "assistant":
+                parts = []
+                for tc in (m.get("tool_calls") or []):
+                    fn = (tc.get("function") or {})
+                    nm = fn.get("name") or "?"
+                    arg = fn.get("arguments") or ""
+                    parts.append(f'<details class="tc"><summary>🔧 调用工具 <b>{html.escape(nm)}</b></summary>'
+                                 f'<pre>{html.escape(arg[:800])}</pre></details>')
+                if content:
+                    parts.append(f'<div class="bub">{html.escape(content)}</div>')
+                model = m.get("model_name") or ""
+                msgs.append(f'<div class="msg a"><div class="who">PicoClaw · {html.escape(ts)}'
+                            f'{" · " + html.escape(model) if model else ""}</div>{"".join(parts)}</div>')
+            elif role == "tool":
+                txt = content[:600]
+                msgs.append(f'<div class="msg t"><details><summary>↳ 工具结果（{len(content)} 字符）</summary>'
+                            f'<pre>{html.escape(txt)}</pre></details></div>')
+        out.append(f'<details class="sess"{" open" if si == 0 else ""}>'
+                   f'<summary>{html.escape(mt)} · {s["total"]} 条消息 · <code>{html.escape(s["name"][:24])}…</code></summary>'
+                   f'<div class="chat">{"".join(msgs)}</div></details>')
+    if not out:
+        out.append('<div class="empty">还没有会话记录。用 CLI 或 cron 跑一次 agent 就会出现在这里。</div>')
+    return "".join(out)
+
+
+def render_pico_page():
+    svc = pico_svc()
+    h = pico_health() or {}
+    cfg = pico_config() or {}
+    dflt = (cfg.get("agents", {}) or {}).get("defaults", {}) or {}
+    models = cfg.get("model_list") or []
+    m0 = models[0] if models else {}
+    servers = ((cfg.get("tools", {}) or {}).get("mcp", {}) or {}).get("servers", {}) or {}
+    active = svc.get("active", "unknown")
+    running = active == "active"
+    mem_c = svc.get("MemoryCurrent") or ""
+    try:
+        mem_txt = fmt_size(int(mem_c))
+    except Exception:
+        mem_txt = "—"
+    badge = (f'<span class="pill {"ok" if running else "bad"}">{"运行中" if running else ("已停止" if active != "unknown" else "未知")}</span>')
+    health_txt = (f'<span class="pill ok">健康 · {html.escape(str(h.get("uptime", "")))}</span>'
+                  if h.get("status") == "ok" else '<span class="pill bad">health 无响应</span>')
+    svc_rows = "".join(f'<tr><td>{html.escape(k)}</td><td><code>{html.escape(str(v))}</code></td></tr>'
+                       for k, v in (("服务状态", active), ("PID", svc.get("MainPID", "-")),
+                                    ("内存占用", mem_txt), ("重启次数", svc.get("NRestarts", "-")),
+                                    ("启动时间", svc.get("ActiveEnterTimestamp", "-")),
+                                    ("监听", f"0.0.0.0:{PICO_PORT}")))
+    model_rows = "".join(f'<tr><td>{html.escape(k)}</td><td><code>{html.escape(str(v))}</code></td></tr>'
+                         for k, v in (("对话名", m0.get("model_name", "-")),
+                                      ("真实模型", m0.get("model", "-")),
+                                      ("上游地址", m0.get("api_base", "-")),
+                                      ("上下文窗口", dflt.get("context_window", "-")),
+                                      ("单次最大输出", dflt.get("max_tokens", "-")),
+                                      ("温度", dflt.get("temperature", "-")),
+                                      ("工具迭代上限", dflt.get("max_tool_iterations", "-")),
+                                      ("工作区", dflt.get("workspace", "-"))))
+    tool_rows = "".join(
+        f'<tr><td><code>{html.escape(name)}</code></td><td>{html.escape(str(sv.get("type", "?")))}</td>'
+        f'<td><code>{html.escape(str(sv.get("url", "")))}</code></td>'
+        f'<td><span class="pill {"ok" if sv.get("enabled") else "bad"}">{"启用" if sv.get("enabled") else "关闭"}</span></td></tr>'
+        for name, sv in servers.items()) or '<tr><td colspan="4" class="dim">未配置 MCP server</td></tr>'
+    unit_rows = "".join(f'<tr><td>{html.escape(k)}</td><td><code>{html.escape(v)}</code></td></tr>'
+                        for k, v in _pico_unit_summary()) or '<tr><td colspan="2" class="dim">未找到 unit 文件</td></tr>'
+    bsize, btime = _pico_bin_info()
+    return (PICO_PAGE
+            .replace("__BADGE__", badge)
+            .replace("__HEALTH__", health_txt)
+            .replace("__PORT__", str(PICO_PORT))
+            .replace("__SVC_ROWS__", svc_rows)
+            .replace("__MODEL_ROWS__", model_rows)
+            .replace("__TOOL_ROWS__", tool_rows)
+            .replace("__UNIT_ROWS__", unit_rows)
+            .replace("__BIN__", html.escape(PICO_BIN))
+            .replace("__BIN_SIZE__", bsize)
+            .replace("__BIN_TIME__", btime)
+            .replace("__CONF__", html.escape(PICO_CONF))
+            .replace("__SESSIONS__", render_pico_sessions())
+            .replace("__TIME__", time.strftime("%Y-%m-%d %H:%M:%S")))
+
+
 class Handler(BaseHTTPRequestHandler):
     # ---- 文件浏览用的 Basic 认证 + 流式下载 ----
     def _files_auth(self):
@@ -905,6 +1134,38 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+    def do_POST(self):
+        try:
+            path = self.path.split("?")[0]
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            if path == "/api/pico/ctl":
+                if not self._files_auth():
+                    return
+                action = (qs.get("action") or [""])[0]
+                if action not in ("start", "stop", "restart"):
+                    body = json.dumps({"ok": False, "active": "?", "err": "bad action"}).encode()
+                else:
+                    subprocess.run(["systemctl", action, PICO_SVC], capture_output=True, timeout=30)
+                    time.sleep(1.5)
+                    svc = pico_svc()
+                    body = json.dumps({"ok": svc.get("active") == "active" or action == "stop",
+                                       "active": svc.get("active", "?")}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(404)
+            self.end_headers()
+        except Exception as e:
+            try:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(str(e).encode())
+            except Exception:
+                pass
+
     def do_GET(self):
         try:
             path = self.path.split("?")[0]
@@ -936,6 +1197,31 @@ class Handler(BaseHTTPRequestHandler):
                 body = render_shots_page().encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+            elif path == "/picoclaw":
+                if not self._files_auth():
+                    return
+                body = render_pico_page().encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            elif path == "/api/pico/log":
+                if not self._files_auth():
+                    return
+                qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                try:
+                    n = max(10, min(400, int((qs.get("n") or ["140"])[0])))
+                except Exception:
+                    n = 140
+                body = json.dumps(pico_log(n), ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
             elif path in ("/files", "/dl", "/view"):
                 if not self._files_auth():
                     return

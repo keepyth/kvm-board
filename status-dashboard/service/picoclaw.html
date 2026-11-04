@@ -1,0 +1,108 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PicoClaw 可视化 · NanoKVM-Go</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;padding:22px 26px 44px;background:#0f1218;color:#e6e9ef;font:14px/1.6 system-ui,"Segoe UI","PingFang SC",sans-serif}
+h1{font-size:19px;margin:0;font-weight:650;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sub{color:#8a93a5;font-size:12.5px;margin:6px 0 18px}
+.sub a{color:#7fb3e8;text-decoration:none}
+.sub a:hover{text-decoration:underline}
+.pill{display:inline-block;padding:1px 9px;border-radius:20px;font-size:11.5px;border:1px solid transparent;white-space:nowrap}
+.pill.ok{background:#16301f;color:#7ddc9a;border-color:#255c39}
+.pill.bad{background:#331a1c;color:#f08a8a;border-color:#5c2a2e}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px;margin-bottom:16px}
+.card{background:#151a24;border:1px solid #232a38;border-radius:8px;overflow:hidden}
+.card h2{font-size:13px;margin:0;padding:9px 12px;color:#9aa6b8;font-weight:600;border-bottom:1px solid #232a38;background:#131822;display:flex;justify-content:space-between;gap:8px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+td{padding:5px 12px;border-bottom:1px solid #1a2029;vertical-align:top}
+tr:last-child td{border-bottom:none}
+td:first-child{color:#8a93a5;white-space:nowrap;width:38%}
+code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:#a9c4e4;word-break:break-all}
+.dim{color:#6f7787;text-align:center;padding:16px}
+.ctl{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+button{padding:5px 14px;border:1px solid #2a3344;border-radius:6px;background:#1a2231;color:#c9d2e2;font-size:12.5px;cursor:pointer}
+button:hover{border-color:#3a4a66}
+button.go{color:#8fd6a8;border-color:#2b4234}
+button.stop{color:#f0a0a0;border-color:#4a2b2e}
+.sess{margin-bottom:10px;background:#151a24;border:1px solid #232a38;border-radius:8px}
+.sess>summary{padding:9px 12px;cursor:pointer;font-size:12.5px;color:#9aa6b8;list-style:none}
+.sess>summary::-webkit-details-marker{display:none}
+.sess>summary:before{content:"▸ ";color:#5a6478}
+.sess[open]>summary:before{content:"▾ "}
+.chat{padding:10px 14px 14px;border-top:1px solid #232a38}
+.msg{margin:8px 0}
+.msg .who{font-size:11px;color:#6f7787;margin-bottom:3px}
+.msg.u .bub{background:#1b2b3d;border:1px solid #2b4560;color:#d8e6f6}
+.msg.a .bub{background:#1a2029;border:1px solid #2a3344;color:#dfe6f0}
+.bub{padding:8px 11px;border-radius:8px;white-space:pre-wrap;word-break:break-word;font-size:13px}
+.msg.t{margin-left:18px}
+.msg.t summary{font-size:11.5px;color:#8a93a5;cursor:pointer}
+.msg.t pre,.tc pre{margin:5px 0 0;padding:8px 10px;background:#0b0e13;border:1px solid #232a38;border-radius:6px;font-size:11.5px;color:#9fb3cc;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow:auto}
+.tc{margin:5px 0}
+.tc summary{font-size:12px;color:#c9a86a;cursor:pointer}
+.empty{padding:26px;border:1px dashed #2a3344;border-radius:8px;color:#8a93a5;text-align:center;font-size:12.5px}
+.logbox{background:#0b0e13;border:1px solid #232a38;border-radius:8px;padding:10px 12px;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.75;max-height:420px;overflow:auto}
+.logbox div{white-space:pre-wrap;word-break:break-all}
+.lvl-warn{color:#e5c07b}.lvl-error{color:#f08a8a}.lvl-info{color:#9aa6b8}.lvl-debug{color:#6b7688}.lvl-raw{color:#7f8a9a}
+.cm{color:#6d8fb8}
+h3{font-size:13px;color:#8a93a5;font-weight:600;margin:22px 0 10px}
+.note{margin-top:14px;font-size:11.5px;color:#6f7787}
+</style></head><body>
+<h1>🦞 PicoClaw 控制台 __BADGE__ __HEALTH__</h1>
+<div class="sub">服务 <code>picoclaw-gateway</code> · 端口 __PORT__ · 刷新于 __TIME__ · <a href="/">状态面板</a> · <a href="/memory">记忆面板</a> · <a href="/files?p=/opt/picoclaw">📁 安装目录</a></div>
+
+<div class="ctl">
+  <button class="go" onclick="ctl('start')">▶ 启动</button>
+  <button class="stop" onclick="ctl('stop')">■ 停止</button>
+  <button onclick="ctl('restart')">⟳ 重启</button>
+  <button onclick="location.reload()">🔄 刷新页面</button>
+</div>
+
+<div class="grid">
+  <div class="card"><h2>运行状态</h2><table>__SVC_ROWS__</table></div>
+  <div class="card"><h2>模型与参数</h2><table>__MODEL_ROWS__</table></div>
+  <div class="card"><h2>MCP 工具接入</h2><table><tr><td>server</td><td>类型</td><td>地址</td><td>状态</td></tr>__TOOL_ROWS__</table></div>
+  <div class="card"><h2>安装信息</h2>
+    <table>
+      <tr><td>二进制</td><td><code>__BIN__</code><br>__BIN_SIZE__ · __BIN_TIME__</td></tr>
+      <tr><td>配置</td><td><code>__CONF__</code></td></tr>
+      __UNIT_ROWS__
+    </table>
+  </div>
+</div>
+
+<h3>💬 会话记录</h3>
+__SESSIONS__
+
+<h3>📜 运行日志（每 8 秒自动刷新）</h3>
+<div class="logbox" id="log">加载中…</div>
+<p class="note">日志来自 <code>/root/.picoclaw/logs/gateway.log</code>；带 <b>🔧</b> 的折叠块就是 agent 实际调用的工具和参数，<b>↳</b> 是工具返回。原来「看不到它干了什么」的黑箱，这里全部摊开。</p>
+
+<script>
+async function ctl(a){
+  if(!confirm('确定要 '+a+' picoclaw-gateway 吗？')) return;
+  try{
+    const r = await fetch('/api/pico/ctl?action='+a,{method:'POST'});
+    const j = await r.json();
+    alert('操作结果：'+(j.ok?'成功':'失败')+'，当前状态 '+j.active);
+  }catch(e){ alert('请求失败：'+e); }
+  location.reload();
+}
+function esc(s){ return (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+async function loadLog(){
+  try{
+    const r = await fetch('/api/pico/log?n=140');
+    const arr = await r.json();
+    const box = document.getElementById('log');
+    if(!arr.length){ box.innerHTML = '<div class="lvl-raw">（暂无日志）</div>'; return; }
+    box.innerHTML = arr.map(x =>
+      '<div class="lvl-'+esc(x.lvl)+'">'+esc(x.t)+' <span class="cm">'+esc(x.comp)+'</span> '+esc(x.msg)+'</div>'
+    ).join('');
+    box.scrollTop = box.scrollHeight;
+  }catch(e){}
+}
+loadLog(); setInterval(loadLog, 8000);
+</script>
+</body></html>
