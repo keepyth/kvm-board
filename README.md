@@ -3,7 +3,7 @@
 在 NanoKVM-Go 网页「设置 → 应用 → 应用源 → 添加服务器」填入本仓库 URL 即可安装应用。
 
 ## 应用列表
-- **status-dashboard**：设备状态仪表盘。安装时自动部署 systemd 服务 `nanokvm-status`，浏览器访问 `http://<kvm-ip>:8123`（完整面板）+ `/api/status`（JSON API）。触摸屏应用本身仅显示服务状态、点按启停。`/memory` 为记忆织网面板（memfab 长期记忆 + 屏幕全文识别）。
+- **status-dashboard**：设备状态仪表盘。安装时自动部署 systemd 服务 `nanokvm-status`，浏览器访问 `http://<kvm-ip>:8123`（完整面板）+ `/api/status`（JSON API）。触摸屏应用本身仅显示服务状态、点按启停。`/memory` 为记忆织网面板（memfab 长期记忆 + 屏幕全文识别），`/shots` 为截图存档，`/files` 为**网页文件管理器**（浏览设备硬盘、点一下下载；Basic 认证，账号密码在 `/etc/kvm/files.pass`，只读，屏蔽 `/proc` `/sys` `/dev` `/run`）。
 
 ## /memory 面板的依赖安装
 

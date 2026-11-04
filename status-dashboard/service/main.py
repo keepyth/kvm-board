@@ -2,8 +2,11 @@
 """NanoKVM-Go+ 后台状态服务：Web 仪表盘 + JSON API，端口 8123。
 /memory —— 记忆织网面板（memfab 记忆与屏幕观察）"""
 
+import base64
+import hmac
 import html
 import json
+import mimetypes
 import os
 import re
 import shutil
@@ -25,6 +28,8 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 PAGE = open(os.path.join(BASE, "page.html"), encoding="utf-8").read()
 MEM_PAGE = open(os.path.join(BASE, "memory.html"), encoding="utf-8").read()
 SHOTS_PAGE = open(os.path.join(BASE, "shots.html"), encoding="utf-8").read()
+FILES_PAGE = open(os.path.join(BASE, "files.html"), encoding="utf-8").read()
+FILES_PASS = os.environ.get("FILES_PASS", "/etc/kvm/files.pass")   # 格式: 用户名:密码（一行）
 
 
 def read_cpu():
@@ -683,7 +688,223 @@ def render_memory_page():
             .replace("__TIME__", frag["time"]))
 
 
+# ---------- 文件浏览器（/files 浏览 + /dl 下载） ----------
+
+BLOCKED_PREFIX = ("/proc", "/sys", "/dev", "/run")
+_AUTH_CACHE = {"t": 0.0, "v": ("", "")}
+
+
+def files_auth_conf():
+    """读取 /etc/kvm/files.pass（user:pass），5 秒缓存。"""
+    now = time.time()
+    if now - _AUTH_CACHE["t"] > 5:
+        try:
+            line = open(FILES_PASS, encoding="utf-8", errors="replace").read().strip()
+        except Exception:
+            line = ""
+        u, _, p = line.partition(":")
+        _AUTH_CACHE["v"] = (u, p) if (u and p) else ("", "")
+        _AUTH_CACHE["t"] = now
+    return _AUTH_CACHE["v"]
+
+
+def safe_path(p):
+    """规范化并拦截虚拟/设备目录，返回 None 表示不可访问。"""
+    if not p:
+        p = "/"
+    if not (p.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", p)):
+        p = "/" + p
+    try:
+        rp = os.path.realpath(p)
+    except Exception:
+        return None
+    for b in BLOCKED_PREFIX:
+        if rp == b or rp.startswith(b + "/"):
+            return None
+    return rp
+
+
+def fmt_size(n):
+    try:
+        n = float(n)
+    except Exception:
+        return "-"
+    if n < 1024:
+        return f"{int(n)} B"
+    for u in ("KB", "MB", "GB", "TB"):
+        n /= 1024.0
+        if n < 1024:
+            return f"{n:.1f} {u}"
+    return f"{n:.1f} PB"
+
+
+def file_icon(name, is_dir):
+    if is_dir:
+        return "📁"
+    n = name.lower()
+    if n.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")):
+        return "🖼"
+    if n.endswith((".mp4", ".mkv", ".avi", ".mov", ".webm")):
+        return "🎬"
+    if n.endswith((".mp3", ".wav", ".flac", ".ogg", ".m4a")):
+        return "🎵"
+    if n.endswith((".zip", ".gz", ".tar", ".xz", ".7z", ".bz2", ".tgz")):
+        return "📦"
+    if n.endswith((".py", ".sh", ".js", ".json", ".yml", ".yaml", ".toml", ".conf",
+                   ".ini", ".service", ".html", ".css", ".md", ".txt", ".log")):
+        return "📄"
+    if n.endswith((".db", ".sqlite", ".sqlite3")):
+        return "🗄"
+    return "📃"
+
+
+def render_files_page(path, show_hidden=False):
+    q = lambda s: urllib.parse.quote(s, safe="")
+    crumbs = ['<a href="/files?p=/">根目录</a>']
+    parts = [x for x in path.split("/") if x]
+    acc = ""
+    for seg in parts:
+        acc += "/" + seg
+        crumbs.append(f'<a href="/files?p={q(acc)}">{html.escape(seg)}</a>')
+    crumb = '<span class="sep">/</span>'.join(crumbs)
+
+    up = ""
+    if path != "/":
+        parent = os.path.dirname(path.rstrip("/")) or "/"
+        up = f'<a class="btn" href="/files?p={q(parent)}">↑ 上级目录</a>'
+
+    rows = []
+    try:
+        entries = list(os.scandir(path))
+    except PermissionError:
+        entries = []
+        rows.append('<tr><td colspan="4" class="err">无权限读取该目录</td></tr>')
+    except Exception as e:
+        entries = []
+        rows.append(f'<tr><td colspan="4" class="err">{html.escape(str(e))}</td></tr>')
+
+    dirs, files = [], []
+    for e in entries:
+        if not show_hidden and e.name.startswith("."):
+            continue
+        try:
+            is_dir = e.is_dir(follow_symlinks=False)
+            st = e.stat(follow_symlinks=False)
+        except Exception:
+            continue
+        (dirs if is_dir else files).append((e.name, is_dir, st))
+    dirs.sort(key=lambda x: x[0].lower())
+    files.sort(key=lambda x: x[0].lower())
+
+    for name, is_dir, st in (dirs + files)[:800]:
+        full = os.path.join(path, name) if path != "/" else "/" + name
+        fq = q(full)
+        nm = html.escape(name) + ("/" if is_dir else "")
+        ts = datetime.fromtimestamp(st.st_mtime, BJ).strftime("%m-%d %H:%M")
+        size = "—" if is_dir else fmt_size(st.st_size)
+        if is_dir:
+            link = f'<a class="nm" href="/files?p={fq}">{file_icon(name, True)} {nm}</a>'
+            act = ""
+        else:
+            link = f'<span class="nm">{file_icon(name, False)} {nm}</span>'
+            act = f'<a class="btn dl" href="/dl?p={fq}">下载</a>'
+            if name.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".txt", ".log", ".json", ".md")):
+                act += f' <a class="btn" href="/view?p={fq}" target="_blank">预览</a>'
+        rows.append(f'<tr><td>{link}</td><td class="num">{size}</td>'
+                    f'<td class="num">{ts}</td><td class="act">{act}</td></tr>')
+
+    if not rows:
+        rows.append('<tr><td colspan="4" class="err">空目录</td></tr>')
+
+    return (FILES_PAGE
+            .replace("__CRUMB__", crumb)
+            .replace("__UP__", up)
+            .replace("__P__", html.escape(path))
+            .replace("__PQ__", q(path))
+            .replace("__ROWS__", "".join(rows))
+            .replace("__COUNT__", str(len(dirs) + len(files)))
+            .replace("__HIDDEN__", "1" if show_hidden else "0")
+            .replace("__HTOGGLE__", "0" if show_hidden else "1")
+            .replace("__HIDDEN_LABEL__", "隐藏点文件" if show_hidden else "显示点文件")
+            .replace("__TIME__", time.strftime("%Y-%m-%d %H:%M:%S")))
+
+
 class Handler(BaseHTTPRequestHandler):
+    # ---- 文件浏览用的 Basic 认证 + 流式下载 ----
+    def _files_auth(self):
+        user, pw = files_auth_conf()
+        if not user:
+            msg = ("未设置访问密码。请在 KVM 终端或 SSH 执行：\n"
+                   "  echo 'kvm:你的密码' > /etc/kvm/files.pass && chmod 600 /etc/kvm/files.pass\n"
+                   "  systemctl restart nanokvm-status\n")
+            self.send_response(403)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(msg.encode())
+            return False
+        raw = self.headers.get("Authorization", "")
+        got = ""
+        if raw.startswith("Basic "):
+            try:
+                got = base64.b64decode(raw[6:]).decode("utf-8", "replace")
+            except Exception:
+                got = ""
+        if hmac.compare_digest(got, f"{user}:{pw}"):
+            return True
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="NanoKVM Files", charset="UTF-8"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write("需要登录（用户名/密码见 /etc/kvm/files.pass）".encode())
+        return False
+
+    def _not_found(self, msg="not found"):
+        self.send_response(404)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(msg.encode())
+
+    def _send_file(self, fp, inline=False):
+        """分块流式发送，避免把大文件读进内存（设备只有 256MB）。"""
+        name = os.path.basename(fp)
+        ext = os.path.splitext(name)[1].lower()
+        inline_ok = ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+                            ".txt", ".log", ".json", ".md", ".csv", ".conf",
+                            ".ini", ".yml", ".yaml", ".service", ".sh", ".py", ".toml")
+        if inline and not inline_ok:
+            inline = False
+        ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        if ext in (".txt", ".log", ".json", ".md", ".csv", ".conf", ".ini",
+                   ".yml", ".yaml", ".service", ".sh", ".py", ".toml"):
+            ctype = "text/plain; charset=utf-8"
+        try:
+            size = os.path.getsize(fp)
+        except Exception:
+            return self._not_found()
+        ascii_name = name.encode("ascii", "replace").decode().replace('"', "_")
+        disp = "inline" if inline else "attachment"
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition",
+                             f"{disp}; filename=\"{ascii_name}\"; "
+                             f"filename*=UTF-8''{urllib.parse.quote(name, safe='')}")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            with open(fp, "rb") as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            pass
+
     def do_GET(self):
         try:
             path = self.path.split("?")[0]
@@ -715,6 +936,29 @@ class Handler(BaseHTTPRequestHandler):
                 body = render_shots_page().encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+            elif path in ("/files", "/dl", "/view"):
+                if not self._files_auth():
+                    return
+                qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                fp = safe_path((qs.get("p") or ["/"])[0])
+                if fp is None:
+                    return self._not_found("该路径不可访问")
+                if path == "/files":
+                    if os.path.isfile(fp):
+                        return self._send_file(fp, inline=False)
+                    if not os.path.isdir(fp):
+                        return self._not_found("目录不存在")
+                    show_hidden = (qs.get("h") or ["0"])[0] == "1"
+                    body = render_files_page(fp, show_hidden).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if not os.path.isfile(fp):
+                    return self._not_found()
+                return self._send_file(fp, inline=(path == "/view"))
             elif path == "/shot/live":
                 # 最近一轮抓到的原始帧（每轮覆盖写，最多 INTERVAL 秒旧）
                 fp = "/var/lib/kvm-ocr/frame.jpg"

@@ -203,6 +203,16 @@ systemctl daemon-reload
 systemctl enable llm-proxy nanokvm-status >/dev/null 2>&1 || true
 systemctl restart llm-proxy >/dev/null 2>&1 || warn "llm-proxy 启动失败"
 systemctl restart nanokvm-status >/dev/null 2>&1 || warn "nanokvm-status 启动失败"
+
+# ---------- 文件管理器口令（/files 页 Basic 认证） ----------
+if [ ! -f /etc/kvm/files.pass ]; then
+  FP=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-10)
+  echo "kvm:$FP" > /etc/kvm/files.pass
+  chmod 600 /etc/kvm/files.pass
+  log "文件管理器已启用：http://<kvm-ip>:8123/files 账号 kvm 密码 $FP"
+else
+  log "文件管理器口令沿用 /etc/kvm/files.pass（账号 root 可 cat 查看）"
+fi
 if [ "$NO_OCR" = "1" ]; then
   log "按 --no-ocr 跳过 kvm-ocr"
   systemctl disable kvm-ocr >/dev/null 2>&1 || true
