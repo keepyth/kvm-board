@@ -22,6 +22,8 @@ from PIL import Image
 
 MCP_URL = "https://127.0.0.1/api/mcp"
 INGEST_URL = "http://127.0.0.1:8743/v1/observations"
+NPU_OCR = "/kvmcomm/ocr/nano_ocr_app"   # 厂商自带 PP-OCR NPU 版（AX620E）
+ENGINE = os.environ.get("OCR_ENGINE", "npu").lower()   # npu | tesseract
 FRAME = "/var/lib/kvm-ocr/frame.jpg"
 WORK_GRAY = "/var/lib/kvm-ocr/gray.png"
 STATE = "/var/lib/kvm-ocr/last_text"
@@ -183,6 +185,53 @@ def ocr_lines(path):
     return out
 
 
+def ocr_lines_npu(image_path):
+    """nano_ocr_app（PP-OCRv3 det + v4 rec，跑在 AX620E NPU）→ 行列表。
+
+    产物 JSON 形如 {"ocr": {"text": ..., "blocks": [{"text","bbox":[x0,y0,x1,y1],"confidence"}]}}
+    bbox 相对传入图片的原始像素；返回结构与 tesseract TSV 版一致。
+    """
+    base = os.path.splitext(image_path)[0]
+    out_json = base + "_output_result.json"
+    try:
+        os.remove(out_json)
+    except OSError:
+        pass
+    try:
+        r = subprocess.run([NPU_OCR, "--image", image_path, "--log", "error"],
+                           capture_output=True, timeout=300)
+    except Exception as e:  # noqa: BLE001
+        log("NPU OCR 调用失败: %s" % e)
+        return []
+    if not os.path.isfile(out_json):
+        log("NPU OCR 无 JSON 产出（rc=%s）" % r.returncode)
+        return []
+    try:
+        raw = open(out_json, "rb").read()
+        for enc in ("utf-8", "gb18030"):
+            try:
+                d = json.loads(raw.decode(enc))
+                break
+            except (UnicodeDecodeError, ValueError):
+                continue
+        else:
+            d = json.loads(raw.decode("utf-8", "replace"))
+    except Exception as e:  # noqa: BLE001
+        log("NPU JSON 解析失败: %s" % e)
+        return []
+    out = []
+    for b in d.get("ocr", {}).get("blocks", []):
+        t = (b.get("text") or "").strip()
+        bb = b.get("bbox") or []
+        if not t or len(bb) < 4:
+            continue
+        x0, y0, x1, y1 = [int(v) for v in bb[:4]]
+        out.append({"text": t, "x": x0, "y": y0, "w": max(1, x1 - x0), "h": max(1, y1 - y0),
+                    "conf": int(round(float(b.get("confidence") or 0) * 100))})
+    out.sort(key=lambda o: (o["y"], o["x"]))
+    return out
+
+
 def band_name(y0, y1, height):
     mid = (y0 + y1) / 2.0 / max(1, height)
     if mid < 0.18:
@@ -214,12 +263,13 @@ def split_blocks(lines):
     return blocks
 
 
-def to_markdown(cols, split_x, elapsed, size):
+def to_markdown(cols, split_x, elapsed, size, scale=SCALE, engine=None):
     """cols: [(label, lines, x0, x1)] → 层次化 markdown。"""
+    engine = engine or ("tesseract chi_sim psm%s" % PSM)
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     head = ["# 屏幕识别 · 结构化全文", "",
-            "> 采集 %s · 引擎 tesseract chi_sim psm%s · 灰度 %.1fx · %s · 耗时 %.0fs · 画面 %dx%d"
-            % (stamp, PSM, SCALE,
+            "> 采集 %s · 引擎 %s · %s · %s · 耗时 %.0fs · 画面 %dx%d"
+            % (stamp, engine, ("放大 %.1fx" % scale) if scale != 1 else "原始分辨率",
                ("分栏 @%dpx" % split_x) if split_x else "未分栏",
                elapsed, size[0], size[1]), ""]
     body = []
@@ -228,33 +278,57 @@ def to_markdown(cols, split_x, elapsed, size):
             continue
         body.append("## %s（x %d–%d，共 %d 行）" % (label, x0, x1, len(lines)))
         for bi, blk in enumerate(split_blocks(lines), 1):
-            y0 = int(blk[0]["y"] / SCALE)
-            y1 = int((blk[-1]["y"] + blk[-1]["h"]) / SCALE)
+            y0 = int(blk[0]["y"] / scale)
+            y1 = int((blk[-1]["y"] + blk[-1]["h"]) / scale)
             body.append("")
-            body.append("### 区块 %d · %s（y %d–%d）" % (bi, band_name(blk[0]["y"], blk[-1]["y"], size[1] * SCALE), y0, y1))
+            body.append("### 区块 %d · %s（y %d–%d）" % (bi, band_name(blk[0]["y"], blk[-1]["y"], size[1] * scale), y0, y1))
             for ln in blk:
                 body.append(ln["text"])
         body.append("")
     return "\n".join(head + body).strip()[:MAX_CHARS]
 
 
-def ocr_frame():
-    """灰度 → 1.5x 放大 → 自适应拆栏 → 逐栏 TSV → 结构化 markdown。
-    返回 (markdown, 分栏模式, 原始行数)。"""
+def ocr_frame(path=None):
+    """自适应拆栏 → 逐栏识别 → 结构化 markdown。返回 (markdown, 分栏模式, 原始行数)。
+
+    OCR_ENGINE=npu（默认）：调用厂商 nano_ocr_app，PP-OCR det+rec 跑 NPU，原始分辨率；
+    识别为空或程序缺失时自动回落到 tesseract（灰度 1.5x + TSV）。
+    """
     started = time.time()
-    im = Image.open(FRAME).convert("L")
+    path = path or FRAME
+    im = Image.open(path).convert("L")
     w, h = im.size
     up = im.resize((int(w * SCALE), int(h * SCALE)), Image.LANCZOS)
     up.save(WORK_GRAY)
     gx = find_gutter(up)
+    use_npu = ENGINE == "npu" and os.path.isfile(NPU_OCR)
+    scale, engine = SCALE, ("nano_ocr PP-OCRv4 · NPU" if use_npu else None)
+
+    rgb = Image.open(path).convert("RGB") if use_npu else None
     cols, mode, split_x, total = [], "single", 0, 0
-    if gx and w * 0.25 < gx / SCALE < w * 0.75:
+    has_gutter = bool(gx and w * 0.25 < gx / SCALE < w * 0.75)
+    if has_gutter:
+        split_x = int(gx / SCALE)
+
+    if use_npu:
+        # 实测：1.5x 彩图放大后准确率明显提升（11s vs 8s，仍远快于 tesseract 40s）
+        rgb.resize((int(w * SCALE), int(h * SCALE)), Image.LANCZOS).save("/var/lib/kvm-ocr/npu_full.png")
+        all_lines = ocr_lines_npu("/var/lib/kvm-ocr/npu_full.png")
+        total = len(all_lines)
+        if has_gutter:
+            ll = [l for l in all_lines if l["x"] + l["w"] / 2.0 < split_x]
+            rl = [l for l in all_lines if l["x"] + l["w"] / 2.0 >= split_x]
+            cols = [("主栏 · 左侧内容区", ll, 0, split_x),
+                    ("侧栏 · 右侧边栏", rl, split_x, w)]
+            mode = "split@%d" % split_x
+        else:
+            cols = [("全屏 · 单栏", all_lines, 0, w)]
+    elif has_gutter:
         left = up.crop((0, 0, gx - 4, up.size[1]))
         right = up.crop((gx + 4, 0, up.size[0], up.size[1]))
         left.save("/var/lib/kvm-ocr/colL.png")
         right.save("/var/lib/kvm-ocr/colR.png")
         ll, rl = ocr_lines("/var/lib/kvm-ocr/colL.png"), ocr_lines("/var/lib/kvm-ocr/colR.png")
-        split_x = int(gx / SCALE)
         cols = [("主栏 · 左侧内容区", ll, 0, split_x),
                 ("侧栏 · 右侧边栏", rl, split_x, w)]
         total = len(ll) + len(rl)
@@ -263,7 +337,16 @@ def ocr_frame():
         lines = ocr_lines(WORK_GRAY)
         cols = [("全屏 · 单栏", lines, 0, w)]
         total = len(lines)
-    md = to_markdown(cols, split_x, time.time() - started, (w, h))
+
+    if use_npu and total == 0:          # NPU 没出字 → 回落 tesseract
+        log("NPU 未识别出文本，回落 tesseract")
+        scale, engine = SCALE, None
+        lines = ocr_lines(WORK_GRAY)
+        cols = [("全屏 · 单栏（tesseract 回落）", lines, 0, w)]
+        total = len(lines)
+        mode, split_x = "fallback", 0
+
+    md = to_markdown(cols, split_x, time.time() - started, (w, h), scale, engine)
     return md, mode, total
 
 
